@@ -1,6 +1,7 @@
 # app/models/db.py
 from tortoise import Tortoise, fields, run_async
 from tortoise.models import Model
+import os
 
 class User(Model):
     id = fields.IntField(pk=True)
@@ -36,3 +37,15 @@ class JobRow(Model):
     error = fields.TextField(null=True)
     raw_data = fields.JSONField()
     payload = fields.JSONField(null=True)  # final QBO-ready dict after mapping+validation
+
+TORTOISE_ORM = {
+    "connections": {
+        "default": os.environ.get("DATABASE_URL", "sqlite://db.sqlite3")
+    },
+    "apps": {
+        "models": {
+            "models": ["app.models.db", "aerich.models"],
+            "default_connection": "default",
+        }
+    },
+}
