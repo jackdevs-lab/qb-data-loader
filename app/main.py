@@ -1,7 +1,7 @@
 # app/main.py
 from fastapi import FastAPI
 from tortoise.contrib.fastapi import register_tortoise
-from app.core.db import TORTOISE_ORM
+from app.models.db import TORTOISE_ORM
 from app.api.imports import router as import_router
 app = FastAPI(title="QB Data Loader")
 app.include_router(import_router)

@@ -7,6 +7,7 @@ from tortoise import Tortoise
 from app.models.db import Job, JobRow
 from app.models import TORTOISE_ORM
 from app.utils.parser import parse_csv
+from app.schemas.validators import VALIDATORS
 
 # ←←← THIS IS THE LINE CELERY LOOKS FOR ←←←
 celery_app = Celery(
@@ -21,7 +22,6 @@ celery_app.conf.update(task_track_started=True)
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_import_task(self, job_id: int, file_path: str):
-    """Real background task – runs in Celery worker"""
     async def run():
         await Tortoise.init(config=TORTOISE_ORM)
         job = await Job.get(id=job_id)
@@ -41,13 +41,16 @@ def process_import_task(self, job_id: int, file_path: str):
         job.status = "parsed"
         await job.save()
 
-        # cleanup temp file
+        # CLEANUP
         try:
             os.unlink(file_path)
         except FileNotFoundError:
             pass
 
+        # THIS LINE STARTS VALIDATION AUTOMATICALLY
+        from app.tasks.import_tasks import validate_job_task
+        validate_job_task.delay(job.id)
+
         await Tortoise.close_connections()
 
-    # This runs the async code inside the sync Celery task
     asyncio.run(run())
