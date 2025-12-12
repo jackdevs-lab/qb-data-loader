@@ -1,36 +1,65 @@
 # app/api/imports.py
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Depends, HTTPException
-from app.models.db import Job, User
-from app.tasks.import_tasks import process_import_task
-from app.core.security import get_current_user  # stub for now
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks
+from app.models.db import Job, JobRow, User
+import csv
+import io
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api/import", tags=["import"])
 
-@router.post("/import/{object_type}")
-async def upload_file(
-    object_type: str,
+
+async def get_dev_user() -> User:
+    user, _ = await User.get_or_create(
+        email="dev@local.test",
+        defaults={"hashed_password": "dev"}
+    )
+    return user
+
+
+@router.post("/{object_type}")
+async def upload_csv(
+    object_type: str,                    # "customer", "invoice", etc.
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...)
 ):
-    if not file.filename.endswith(".csv"):
-        raise HTTPException(400, "Only CSV for now")
+    user = await get_dev_user()
 
-    contents = await file.read()
+    # Create the Job
     job = await Job.create(
-        user=current_user,
+        user=user,
         object_type=object_type,
-        status="queued",
-        meta={"original_filename": file.filename}
+        status="parsing",
+        meta={"filename": file.filename, "content_type": file.content_type}
     )
 
-    # Save file temporarily (Neon serverless has /tmp)
-    import tempfile, os
-    tmp_path = f"/tmp/{job.id}_{file.filename}"
-    with open(tmp_path, "wb") as f:
-        f.write(contents)
+    # Parse CSV in background so endpoint returns instantly
+    background_tasks.add_task(parse_and_save_rows, job.id, await file.read())
 
-    # Fire and forget (Celery eager in dev → instant)
-    background_tasks.add_task(process_import_task, job.id, tmp_path)
+    return {"job_id": job.id, "status": "queued", "message": "CSV accepted – parsing started"}
 
-    return {"job_id": job.id, "status": "queued"}
+
+async def parse_and_save_rows(job_id: int, content: bytes):
+    job = await Job.get(id=job_id)
+    job.status = "parsing"
+    await job.save()
+
+    reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig")))  # handles BOM
+    rows = list(reader)
+
+    job_rows = []
+    for idx, row in enumerate(rows, start=2):  # start=2 because row 1 = header
+        job_rows.append(JobRow(
+            job=job,
+            row_number=idx,
+            raw_data=row,
+            status="pending"
+        ))
+
+    await JobRow.bulk_create(job_rows)
+
+    job.status = "parsed"
+    job.meta["row_count"] = len(rows)
+    await job.save()
+@router.get("/debug")
+async def debug():
+    jobs = await Job.all().prefetch_related("rows")
+    return [{"job_id": j.id, "status": j.status, "rows": len(j.rows)} for j in jobs]
