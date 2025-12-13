@@ -25,10 +25,9 @@ class Job(Model):
     id = fields.IntField(pk=True)
     user = fields.ForeignKeyField("models.User", related_name="jobs")
     object_type = fields.CharField(max_length=50)
-    status = fields.CharField(max_length=20, default="queued")  # queued → parsing → validating → importing → done|failed
-    meta = fields.JSONField(default=dict)
+    status = fields.CharField(max_length=25, default="queued")
+    meta = fields.JSONField(null=True, default=dict)  # Add null=True
     created_at = fields.DatetimeField(auto_now_add=True)
-
 class JobRow(Model):
     id = fields.IntField(pk=True)
     job = fields.ForeignKeyField("models.Job", related_name="rows")

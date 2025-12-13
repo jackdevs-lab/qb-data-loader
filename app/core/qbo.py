@@ -22,5 +22,9 @@ async def get_qbo_client(user: User) -> httpx.AsyncClient:
             user.qbo_expires_at = int(time.time()) + data["expires_in"]
             await user.save()
 
-    headers = {"Authorization": f"Bearer {user.qbo_access_token}", "Accept": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {user.qbo_access_token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"  # ← Add this
+}
     return httpx.AsyncClient(headers=headers, base_url=f"{BASE_URL}/{user.qbo_realm_id}/")
