@@ -7,7 +7,7 @@ from celery import Celery
 from tortoise import Tortoise
 import logging
 
-from app.models.db import Job, JobRow
+from app.models.db import Job, JobRow, MappingTemplate
 from app.models import TORTOISE_ORM
 from app.schemas.validators import VALIDATORS
 from app.core.qbo import get_qbo_client
@@ -59,6 +59,7 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
         await job.save()
 
         # === 2. Validate ===
+                # === 2. Validate ===
         validator_class = VALIDATORS.get(object_type)
         if not validator_class:
             logger.error(f"No validator found for {object_type}")
@@ -67,17 +68,40 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
             await job.save()
             return
 
+        # Load mapping if provided
+        mapping = {}
+        mapping_id = job.meta.get("mapping_id")
+        if mapping_id:
+            template = await MappingTemplate.get_or_none(id=mapping_id, user=await job.user)
+            if template and template.object_type.lower() == object_type.lower():
+                mapping = template.mapping
+
         valid_count = 0
-        for jrow in await job.rows.all():
-            logger.info(f"Validating row {jrow.row_number}: {jrow.raw_data}")
+        job_rows = await job.rows.all()
+
+        for jrow in job_rows:
+            raw = jrow.raw_data
+
+            # Build mapped data
+            mapped_data = {}
+
+            # Apply user-defined mapping
+            for csv_col, qbo_field in mapping.items():
+                if csv_col in raw:
+                    mapped_data[qbo_field] = raw[csv_col]
+
+            # Auto-map exact column matches (fallback)
+            for col, val in raw.items():
+                if col in validator_class.model_fields and col not in mapped_data:
+                    mapped_data[col] = val
+
             try:
-                validated = validator_class(**jrow.raw_data)
-                logger.info(f"Row {jrow.row_number} VALID")
+                validated = validator_class(**mapped_data)
                 jrow.payload = validated.model_dump(exclude_unset=True, exclude_none=True)
                 jrow.status = "valid"
                 valid_count += 1
             except Exception as e:
-                logger.exception(f"Validation FAILED for row {jrow.row_number}: {type(e).__name__}: {e}")
+                logger.exception(f"Validation FAILED for row {jrow.row_number}")
                 jrow.status = "error"
                 jrow.error = f"{type(e).__name__}: {e}"
             await jrow.save()
@@ -85,6 +109,8 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
         job.meta["valid_count"] = valid_count
         job.status = "importing"
         await job.save()
+
+        # === 3. Import to QBO ===  (unchanged – keep your existing code below)
 
         # === 3. Import to QBO ===
         user = await job.user  # ← this fetches the actual User instance
@@ -94,7 +120,7 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
         valid_rows = await job.rows.filter(status="valid")
         for row in valid_rows:
             payload_to_send = row.payload
-            
+
 
             logger.info(f"Attempting to create {object_type} for row {row.row_number} with payload: {payload_to_send}")
 

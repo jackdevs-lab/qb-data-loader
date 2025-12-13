@@ -1,6 +1,7 @@
 # app/api/imports.py
 from fastapi import APIRouter, UploadFile, File
 from app.models.db import Job, User
+from typing import Optional
 from app.tasks.import_tasks import import_valid_rows_task  # Import at top for clarity
 
 router = APIRouter(prefix="/api/import", tags=["import"])
@@ -17,7 +18,8 @@ async def get_dev_user() -> User:
 @router.post("/{object_type}")
 async def upload_csv(
     object_type: str,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    mapping_id: Optional[int] = None  # ← NEW optional query param
 ):
     user = await get_dev_user()
 
@@ -27,14 +29,13 @@ async def upload_csv(
         status="queued",
         meta={
             "filename": file.filename,
-            "content_type": file.content_type
+            "content_type": file.content_type,
+            "mapping_id": mapping_id  # ← Save for later
         }
     )
 
-    # Read entire file content
     content = await file.read()
 
-    # Send to Celery with correct arguments
     import_valid_rows_task.delay(
         job_id=job.id,
         csv_content=content.decode("utf-8-sig"),
