@@ -1,0 +1,20 @@
+### Start Redis (leave window open)
+### ```powershell
+### & "$env:TEMP\Redis\redis-server.exe"
+### ```
+
+### Start Celery Worker (in a new activated venv window)
+### ```powershell
+### $env:PYTHONPATH = "C:\Users\Ndegwa\Desktop\qb-data-loader"
+### celery -A app.tasks.import_tasks:celery_app worker --loglevel=info
+
+### Start Uvicorn Server (in another new activated venv window)
+
+#uvicorn app.main:app --reload
+
+# Useful Docker Commands for the Future
+# 
+# Stop Redis: docker stop qb-redis
+# Start it again: docker start qb-redis
+# Remove (if you ever want to clean up): docker rm qb-redis (after stopping)
+# View logs: docker logs qb-redis

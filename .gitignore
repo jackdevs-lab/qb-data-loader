@@ -1,1 +1,6 @@
 .env
+.readme.md
+__pycache__/
+
+.vscode/
+node_modules

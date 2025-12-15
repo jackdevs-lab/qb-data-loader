@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     QBO_CLIENT_SECRET: str
     QBO_REDIRECT_URI: str
     QBO_ENVIRONMENT: str = "sandbox"
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: str
+    CLERK_SECRET_KEY: str
 
     CELERY_BROKER_URL: str = "dummy://"
     CELERY_RESULT_BACKEND: str = "dummy://"

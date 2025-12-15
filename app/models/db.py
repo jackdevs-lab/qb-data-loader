@@ -1,12 +1,13 @@
 # app/models/db.py
 from tortoise import Tortoise, fields, run_async
 from tortoise.models import Model
+from app.core.config import settings
 import os
 
 class User(Model):
     id = fields.IntField(pk=True)
-    email = fields.CharField(max_length=255, unique=True)
-    hashed_password = fields.CharField(max_length=255)
+    clerk_id = fields.CharField(max_length=255, unique=True)  # Critical: unique Clerk sub
+    # Remove or ignore email/hashed_password if not needed
     qbo_realm_id = fields.CharField(max_length=50, null=True)
     qbo_access_token = fields.TextField(null=True)
     qbo_refresh_token = fields.TextField(null=True)
@@ -25,21 +26,21 @@ class Job(Model):
     id = fields.IntField(pk=True)
     user = fields.ForeignKeyField("models.User", related_name="jobs")
     object_type = fields.CharField(max_length=50)
-    status = fields.CharField(max_length=25, default="queued")
+    status = fields.CharField(max_length=50, default="queued")
     meta = fields.JSONField(null=True, default=dict)  # Add null=True
     created_at = fields.DatetimeField(auto_now_add=True)
 class JobRow(Model):
     id = fields.IntField(pk=True)
     job = fields.ForeignKeyField("models.Job", related_name="rows")
     row_number = fields.IntField()
-    status = fields.CharField(max_length=20, default="pending")
+    status = fields.CharField(max_length=50, default="pending")
     error = fields.TextField(null=True)
     raw_data = fields.JSONField()
     payload = fields.JSONField(null=True)  # final QBO-ready dict after mapping+validation
 
 TORTOISE_ORM = {
     "connections": {
-        "default": os.environ.get("DATABASE_URL", "sqlite://db.sqlite3")
+        "default": settings.DATABASE_URL
     },
     "apps": {
         "models": {

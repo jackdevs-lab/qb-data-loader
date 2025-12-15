@@ -1,0 +1,24 @@
+{
+  "dependencies": {
+    "@clerk/clerk-js": "^5.114.1",
+    "@clerk/nextjs": "^6.36.2"
+  },
+  "name": "qb-data-loader",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jackdevs-lab/qb-data-loader.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jackdevs-lab/qb-data-loader/issues"
+  },
+  "homepage": "https://github.com/jackdevs-lab/qb-data-loader#readme"
+}

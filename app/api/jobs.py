@@ -1,25 +1,21 @@
-# app/api/jobs.py ← TOP OF FILE (replace everything above the router)
+# app/api/jobs.py
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
-from app.models.db import Job, JobRow
-from app.models.db import User
+from app.models.db import Job, JobRow, User  # Make sure User is imported
 from app.core.qbo import get_qbo_client
+from app.core.auth import get_current_user  # ← THIS WAS MISSING!
 import csv
 import io
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
-# Temporary: act as user_id = 1 (no real auth yet)
-CURRENT_USER_ID = 1
-DUMMY_USER = User(id=1)
-@router.get("/test-qbo-connection")
-async def test_qbo():
-    # Get the real user from DB (tokens are stored here)
-    user = await User.get(id=CURRENT_USER_ID)
-    if not user or not user.qbo_access_token:
-        raise HTTPException(400, "Not connected to QuickBooks yet. Visit /auth/qbo/login first.")
 
-    client = await get_qbo_client(user)
+@router.get("/test-qbo-connection")
+async def test_qbo(current_user: User = Depends(get_current_user)):
+    if not current_user.qbo_access_token:
+        raise HTTPException(400, "Not connected to QuickBooks yet.")
+
+    client = await get_qbo_client(current_user)
     try:
         resp = await client.get("/query?query=SELECT * FROM CompanyInfo")
         resp.raise_for_status()
@@ -27,15 +23,17 @@ async def test_qbo():
         await client.aclose()
         return {
             "company_name": company["CompanyName"],
-            "realm_id": user.qbo_realm_id,
+            "realm_id": current_user.qbo_realm_id,
             "connected": True
         }
     except Exception as e:
         await client.aclose()
         raise HTTPException(400, f"QuickBooks error: {str(e)}")
+
+
 @router.get("")
-async def list_jobs():
-    jobs = await Job.filter(user_id=CURRENT_USER_ID).order_by("-created_at").prefetch_related("rows")
+async def list_jobs(current_user: User = Depends(get_current_user)):
+    jobs = await Job.filter(user=current_user).order_by("-created_at").prefetch_related("rows")
     result = []
     for j in jobs:
         total = len(j.rows)
@@ -51,11 +49,13 @@ async def list_jobs():
         })
     return result
 
+
 @router.get("/{job_id}")
-async def get_job(job_id: int):
-    job = await Job.get_or_none(id=job_id, user_id=CURRENT_USER_ID).prefetch_related("rows")
+async def get_job(job_id: int, current_user: User = Depends(get_current_user)):
+    job = await Job.get_or_none(id=job_id, user=current_user).prefetch_related("rows")
     if not job:
         raise HTTPException(404, "Job not found")
+
     total = len(job.rows)
     return {
         "id": job.id,
@@ -67,12 +67,14 @@ async def get_job(job_id: int):
             "total": total,
             "valid": await job.rows.filter(status="valid").count(),
             "error": await job.rows.filter(status="error").count(),
+            "success": await job.rows.filter(status="success").count(),  # optional
         }
     }
 
+
 @router.get("/{job_id}/errors")
-async def download_errors(job_id: int):
-    job = await Job.get_or_none(id=job_id, user_id=CURRENT_USER_ID).prefetch_related("rows")
+async def download_errors(job_id: int, current_user: User = Depends(get_current_user)):
+    job = await Job.get_or_none(id=job_id, user=current_user).prefetch_related("rows")
     if not job:
         raise HTTPException(404, "Job not found")
 
@@ -82,6 +84,7 @@ async def download_errors(job_id: int):
 
     output = io.StringIO()
     writer = csv.writer(output)
+    # Use the keys from the first row's raw_data
     headers = ["Row #", "Error"] + list(errors[0]["raw_data"].keys())
     writer.writerow(headers)
     for e in errors:
