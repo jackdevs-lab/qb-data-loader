@@ -21,9 +21,12 @@
       <div class="flex items-center gap-8">
         <div class="flex items-center gap-4 text-sm">
           <span id="qbo-status" class="text-gray-500">Checking QuickBooks...</span>
-          <a href="/api/auth_qbo.py" id="connect-qbo-btn" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
+          <button 
+            id="connect-qbo-btn" 
+            onclick="startQBOAuth()" 
+            class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
             Connect to QuickBooks
-          </a>
+          </button>
         </div>
         <div id="clerk-mount"></div>
       </div>
@@ -76,7 +79,62 @@
     let currentJobId = null;
     let csvHeaders = [];
     const jobsEl = document.getElementById('jobs');
+ async function startQBOAuth() {
+  const btn = document.getElementById('connect-qbo-btn');
+  btn.disabled = true;
+  btn.textContent = 'Opening QuickBooks...';
 
+  try {
+    const res = await fetchWithAuth('/api/auth_qbo/qbo/login');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    const width = 600, height = 700;
+    const left = screen.width / 2 - width / 2;
+    const top = screen.height / 2 - height / 2;
+    const popup = window.open(
+      data.redirect_url,
+      'qbo_auth',
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+
+    if (!popup) {
+      alert('Popup blocked! Please allow popups for this site.');
+      btn.disabled = false;
+      btn.textContent = 'Connect to QuickBooks';
+      return;
+    }
+
+    // Listen for success message
+    const handleSuccess = async (event) => {
+      if (event.data === 'qbo_connected') {
+        window.removeEventListener('message', handleSuccess);
+        await updateQBOStatus();
+        await loadJobs();
+        btn.disabled = false;
+        btn.textContent = 'Connect to QuickBooks';
+      }
+    };
+    window.addEventListener('message', handleSuccess);
+
+    // Fallback: poll if popup closes manually
+    const checkClosed = setInterval(async () => {
+      if (popup.closed) {
+        clearInterval(checkClosed);
+        window.removeEventListener('message', handleSuccess);
+        await updateQBOStatus();
+        await loadJobs();
+        btn.disabled = false;
+        btn.textContent = 'Connect to QuickBooks';
+      }
+    }, 500);
+
+  } catch (err) {
+    alert('Error: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = 'Connect to QuickBooks';
+  }
+}
     // === AUTHENTICATED FETCH HELPER ===
     async function fetchWithAuth(url, options = {}) {
       if (!Clerk.session) {

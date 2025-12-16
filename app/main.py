@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 app = FastAPI(title="QB Data Loader")
 app.include_router(import_router)
 app.include_router(jobs_router)
-app.include_router(qbo_auth_router, prefix="/api/auth_qbo.py")
+app.include_router(qbo_auth_router, prefix="/api/auth_qbo")
 app.include_router(mappings_router, prefix="/api/mappings")
 app.add_middleware(
     CORSMiddleware,

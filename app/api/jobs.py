@@ -1,4 +1,6 @@
 # app/api/jobs.py
+import time
+from xmlrpc import client
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from app.models.db import Job, JobRow, User  # Make sure User is imported
@@ -6,29 +8,40 @@ from app.core.qbo import get_qbo_client
 from app.core.auth import get_current_user  # ← THIS WAS MISSING!
 import csv
 import io
+import httpx
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 
 @router.get("/test-qbo-connection")
 async def test_qbo(current_user: User = Depends(get_current_user)):
-    if not current_user.qbo_access_token:
+    print(f"DEBUG: Access token exists: {bool(current_user.qbo_access_token)}")
+    print(f"DEBUG: Realm ID: {current_user.qbo_realm_id}")
+    print(f"DEBUG: Expires at: {current_user.qbo_expires_at}, now: {int(time.time())}, expired: {(current_user.qbo_expires_at or 0) < time.time()}")
+
+    if not current_user.qbo_access_token or not current_user.qbo_realm_id:
         raise HTTPException(400, "Not connected to QuickBooks yet.")
 
     client = await get_qbo_client(current_user)
     try:
-        resp = await client.get("/query?query=SELECT * FROM CompanyInfo")
+        realm_id = current_user.qbo_realm_id
+        resp = await client.get(f"/companyinfo/{realm_id}")
         resp.raise_for_status()
-        company = resp.json()["QueryResponse"]["CompanyInfo"][0]
-        await client.aclose()
+        data = resp.json()
+        company = data["CompanyInfo"]
         return {
             "company_name": company["CompanyName"],
-            "realm_id": current_user.qbo_realm_id,
+            "realm_id": realm_id,
             "connected": True
         }
+    except httpx.HTTPStatusError as e:
+        # This will now show the actual QBO error message, helpful for debugging
+        error_text = e.response.text if e.response else str(e)
+        raise HTTPException(status_code=400, detail=f"QuickBooks error: {error_text}")
     except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Connection failed: {str(e)}")
+    finally:
         await client.aclose()
-        raise HTTPException(400, f"QuickBooks error: {str(e)}")
 
 
 @router.get("")

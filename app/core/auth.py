@@ -1,18 +1,24 @@
 # app/core/auth.py
-import httpx
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from clerk_backend_api import Clerk
-from clerk_backend_api.security.types import AuthenticateRequestOptions
+from jose import JWTError, jwt
 from app.models.db import User
 from tortoise.exceptions import DoesNotExist
-from app.core.config import settings
-
-clerk_sdk = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
+import httpx
+from httpx import AsyncClient
 
 bearer_auth = HTTPBearer(auto_error=False)
 
-async def get_current_user(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer_auth)):
+
+JWKS_URL = "https://workable-kit-45.clerk.accounts.dev/.well-known/jwks.json" 
+
+
+async def get_jwks_data():
+    async with httpx.AsyncClient() as client:
+        response = await client.get(JWKS_URL)
+        response.raise_for_status()
+        return response.json()
+async def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_auth)):
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -20,33 +26,54 @@ async def get_current_user(request: Request, credentials: HTTPAuthorizationCrede
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    httpx_request = httpx.Request(
-        method=request.method,
-        url=str(request.url),
-        headers=request.headers,
-    )
+    token = credentials.credentials
 
     try:
-        # REQUIRED: Pass an empty AuthenticateRequestOptions() — this works for standard session tokens
-        request_state = clerk_sdk.authenticate_request(
-            httpx_request,
-            AuthenticateRequestOptions()  # Empty options = default session token verification (no azp check)
+        # Get JWKS and find the right key
+        jwks_data = await get_jwks_data()
+        unverified_header = jwt.get_unverified_header(token)
+        rsa_key = {}
+        for key in jwks_data["keys"]:
+            if key["kid"] == unverified_header["kid"]:
+                rsa_key = {
+                    "kty": key["kty"],
+                    "kid": key["kid"],
+                    "use": key["use"],
+                    "n": key["n"],
+                    "e": key["e"],
+                }
+                break
+
+        if not rsa_key:
+            raise JWTError("Public key not found")
+
+        # Verify and decode the token
+        payload = jwt.decode(
+            token,
+            rsa_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False},  # Set to True and add audience if you use custom JWT templates
         )
 
-        if not request_state.is_signed_in:
-            print(f"Clerk auth failed: {request_state.reason}")  # Debug in console
-            raise ValueError(request_state.reason or "Invalid session")
+        clerk_user_id: str = payload["sub"]
+        print(f"Authenticated Clerk user: {clerk_user_id}")
 
-        clerk_user_id = request_state.payload["sub"]
-        print(f"Authenticated Clerk user: {clerk_user_id}")  # Confirmation in console
-    except Exception as e:
-        print(f"Clerk verification error: {str(e)}")
+    except JWTError as e:
+        print(f"JWT verification failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid Clerk session: {str(e)}",
+            detail="Invalid or expired Clerk token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        print(f"Unexpected auth error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Create or get local user
     try:
         user = await User.get(clerk_id=clerk_user_id)
     except DoesNotExist:

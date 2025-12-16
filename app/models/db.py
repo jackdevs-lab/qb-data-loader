@@ -7,7 +7,6 @@ import os
 class User(Model):
     id = fields.IntField(pk=True)
     clerk_id = fields.CharField(max_length=255, unique=True)  # Critical: unique Clerk sub
-    # Remove or ignore email/hashed_password if not needed
     qbo_realm_id = fields.CharField(max_length=50, null=True)
     qbo_access_token = fields.TextField(null=True)
     qbo_refresh_token = fields.TextField(null=True)
