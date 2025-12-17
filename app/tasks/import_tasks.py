@@ -6,6 +6,8 @@ import csv
 from celery import Celery
 from tortoise import Tortoise
 import logging
+from typing import Dict, Any
+
 from app.core.websocket import manager
 
 from app.models.db import Job, JobRow, MappingTemplate
@@ -22,6 +24,61 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(task_track_started=True)
+
+
+def normalize_mapping_for_customer(
+    raw_mapping: Dict[str, str],
+    row_data: Dict[str, str]
+) -> Dict[str, Any]:
+    """
+    Converts frontend mapping {CSV column: QBO dotted path}
+    into a dict with keys matching the CustomerRow Pydantic model fields.
+    """
+    normalized: Dict[str, Any] = {}
+
+    for csv_header, qbo_path in raw_mapping.items():
+        if csv_header not in row_data:
+            continue
+
+        value = row_data[csv_header].strip()
+        if not value:  # Skip empty values
+            continue
+
+        # Direct required field
+        if qbo_path == "DisplayName":
+            normalized["DisplayName"] = value
+
+        # Email
+        elif qbo_path == "PrimaryEmailAddr.Address":
+            normalized["PrimaryEmailAddr"] = value
+
+        # Primary Phone
+        elif qbo_path == "PrimaryPhone.FreeFormNumber":
+            normalized["PrimaryPhone"] = value
+
+        # Optional phone fields (add to model later if needed)
+        elif qbo_path == "Mobile.FreeFormNumber":
+            normalized["Mobile"] = value
+
+        elif qbo_path == "Fax.FreeFormNumber":
+            normalized["Fax"] = value
+
+        elif qbo_path == "AlternatePhone.FreeFormNumber":
+            normalized["AlternatePhone"] = value
+
+        # Website
+        elif qbo_path == "WebAddr.URI":
+            normalized["WebAddr"] = value
+
+        # Billing Address fields
+        elif qbo_path.startswith("BillAddr."):
+            field_part = qbo_path[len("BillAddr."):]  # e.g. "City", "Line1"
+            internal_key = f"BillAddr_{field_part}"
+            normalized[internal_key] = value
+
+        # You can extend this for ShipAddr, Notes, Taxable, etc. as needed
+
+    return normalized
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
@@ -101,59 +158,45 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
             await job.save()
             return
 
-        mapping = {}
+        mapping = job.meta.get("mapping", {})
+
+        # Optional: load from saved template (existing logic preserved)
         mapping_id = job.meta.get("mapping_id")
-        if mapping_id:
+        if mapping_id and not mapping:
             template = await MappingTemplate.get_or_none(id=mapping_id, user=await job.user)
             if template and template.object_type.lower() == object_type.lower():
                 mapping = template.mapping
 
-        # Auto-map first column to DisplayName if no mapping (your quick win)
-        
-
         valid_count = 0
         current_rows = await JobRow.filter(job=job).all()
 
+        validator_fields = set(validator_class.model_fields.keys())
+
         for jrow in current_rows:
             raw = jrow.raw_data
-            mapped_data = {}
 
-            for csv_col, qbo_field in mapping.items():
-                if csv_col in raw:
-                    mapped_data[qbo_field] = raw[csv_col]
+            # === NEW: Correct mapping using normalizer ===
+            data_for_model = normalize_mapping_for_customer(mapping, raw)
 
+            # Fallback: exact CSV column name matches model field
             for col, val in raw.items():
-                if col in validator_class.model_fields and col not in mapped_data:
-                    mapped_data[col] = val
+                cleaned = val.strip()
+                if cleaned and col in validator_fields and col not in data_for_model:
+                    data_for_model[col] = cleaned
 
-            # Normalize nested fields
-            if "PrimaryEmailAddr" in mapped_data and isinstance(mapped_data["PrimaryEmailAddr"], str):
-                mapped_data["PrimaryEmailAddr"] = {"Address": mapped_data["PrimaryEmailAddr"].strip()}
-
-            if "PrimaryPhone" in mapped_data and isinstance(mapped_data["PrimaryPhone"], str):
-                mapped_data["PrimaryPhone"] = {"FreeFormNumber": mapped_data["PrimaryPhone"].strip()}
-
-            if any(key.startswith("BillAddr.") for key in mapped_data):
-                bill_addr = {}
-                for key, val in list(mapped_data.items()):
-                    if key.startswith("BillAddr."):
-                        field = key.split(".", 1)[1]
-                        bill_addr[field] = val
-                        del mapped_data[key]
-                if bill_addr:
-                    mapped_data["BillAddr"] = bill_addr
+            logger.info(f"Mapped data: {data_for_model}")
 
             try:
-                validated = validator_class(**mapped_data)
+                validated = validator_class(**data_for_model)
                 jrow.payload = validated.model_dump(exclude_unset=True, exclude_none=True)
                 jrow.status = "valid"
                 valid_count += 1
                 logger.info(f"Row {jrow.row_number} validated successfully")
             except Exception as e:
-                logger.error(f"VALIDATION FAILED for row {jrow.row_number}: {type(e).__name__}: {str(e)}")
-                logger.error(f"Mapped data: {mapped_data}")
+                logger.error(f"VALIDATION FAILED for row {jrow.row_number}: {e}")
+                logger.error(f"Mapped data was: {data_for_model}")
                 jrow.status = "error"
-                jrow.error = f"{type(e).__name__}: {str(e)}"
+                jrow.error = str(e)
             await jrow.save()
 
         job.meta["valid_count"] = valid_count
@@ -183,7 +226,6 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
             logger.info(f"Attempting to create {object_type} for row {row.row_number} with payload: {payload_to_send}")
 
             try:
-                # FIXED: Remove the leading /v3/company/{realm_id} — it's already in the client's base_url
                 resp = await client.post(
                     f"/{object_type.lower()}?minorversion=75",
                     json=payload_to_send
@@ -222,7 +264,6 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
 
         # === Final status ===
         total_valid = len(valid_rows)
-        # FIXED: Use shorter status to avoid truncation (until you expand the DB column)
         job.status = "completed" if success == total_valid else "partial_success"
 
         job.meta.update({"success_count": success, "valid_count": total_valid})

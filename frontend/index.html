@@ -4,16 +4,14 @@
   <meta charset="utf-8">
   <title>QB Data Loader</title>
   <script src="https://cdn.tailwindcss.com"></script>
-
-   <script
-  async
-  crossorigin="anonymous"
-  data-clerk-publishable-key="pk_test_d29ya2FibGUta2l0LTQ1LmNsZXJrLmFjY291bnRzLmRldiQ"
-  src="https://workable-kit-45.clerk.accounts.dev/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
-  type="text/javascript"
-></script>
+  <script
+    async
+    crossorigin="anonymous"
+    data-clerk-publishable-key="pk_test_d29ya2FibGUta2l0LTQ1LmNsZXJrLmFjY291bnRzLmRldiQ"
+    src="https://workable-kit-45.clerk.accounts.dev/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
+    type="text/javascript"
+  ></script>
 </head>
-
 <body class="bg-gray-50 min-h-screen">
   <header class="bg-white shadow-sm border-b">
     <div class="max-w-4xl mx-auto px-8 py-4 flex justify-between items-center">
@@ -21,10 +19,7 @@
       <div class="flex items-center gap-8">
         <div class="flex items-center gap-4 text-sm">
           <span id="qbo-status" class="text-gray-500">Checking QuickBooks...</span>
-          <button 
-            id="connect-qbo-btn" 
-            onclick="startQBOAuth()" 
-            class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
+          <button id="connect-qbo-btn" onclick="startQBOAuth()" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
             Connect to QuickBooks
           </button>
         </div>
@@ -50,22 +45,44 @@
       </div>
     </div>
 
-    <!-- Mapping Preview Section -->
+    <!-- Mapping Section -->
     <div id="mapping-section" style="display:none" class="bg-white rounded-lg shadow p-8 mt-8">
-      <h2 class="text-2xl font-semibold mb-6">Preview & Map Columns</h2>
+      <h2 class="text-2xl font-semibold mb-6">Map Columns to QuickBooks Fields</h2>
       <p class="text-gray-600 mb-8">
-        Your CSV headers have been detected. Map them to QuickBooks fields below. 
-        <span class="text-red-600 font-bold">DisplayName is required*</span>
+        Map your CSV columns to QuickBooks fields. <span class="text-red-600 font-bold">DisplayName is required*</span>
       </p>
-
       <div id="mapping-fields" class="space-y-6 mb-10"></div>
 
       <div class="flex gap-4">
-        <button id="start-import-btn" onclick="startImport()" disabled class="px-8 py-4 bg-green-600 text-white text-lg rounded opacity-50 cursor-not-allowed hover:bg-green-700">
-          Start Import
+        <button id="start-import-btn" onclick="proceedToPreview()" disabled class="px-8 py-4 bg-green-600 text-white text-lg rounded opacity-50 cursor-not-allowed">
+          Proceed to Preview
         </button>
         <button onclick="cancelPreview()" class="px-6 py-4 bg-gray-400 text-white rounded hover:bg-gray-500">
           Cancel
+        </button>
+      </div>
+    </div>
+
+    <!-- Preview Section -->
+    <div id="preview-section" style="display:none" class="bg-white rounded-lg shadow p-8 mt-8">
+      <h2 class="text-2xl font-semibold mb-6">Preview & Edit Data</h2>
+      <p class="text-gray-600 mb-8">
+        Review how your data will appear in QuickBooks. Edit any cell directly.
+      </p>
+
+      <div class="overflow-x-auto mb-8">
+        <table id="preview-table" class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50"></thead>
+          <tbody class="bg-white divide-y divide-gray-200"></tbody>
+        </table>
+      </div>
+
+      <div class="flex gap-4">
+        <button onclick="startImport()" class="px-8 py-4 bg-green-600 text-white text-lg rounded hover:bg-green-700">
+          Confirm & Start Import
+        </button>
+        <button onclick="backToMapping()" class="px-6 py-4 bg-gray-400 text-white rounded hover:bg-gray-500">
+          Back to Mapping
         </button>
       </div>
     </div>
@@ -74,12 +91,50 @@
     <h2 class="text-2xl font-semibold mt-12 mb-6">Recent Jobs</h2>
     <div id="jobs" class="space-y-6"></div>
   </div>
-    <script>
-    // === GLOBAL VARIABLES ===
+
+  <script>
+    // === GLOBALS ===
+    const jobsEl = document.getElementById('jobs');
     let currentJobId = null;
     let csvHeaders = [];
-    const jobsEl = document.getElementById('jobs');
- async function startQBOAuth() {
+    let previewRows = [];
+    let mapping = {};
+
+    const QBO_FIELDS = [
+  { value: "", label: "-- Not mapped --" },
+  { value: "DisplayName", label: "DisplayName * (Required)" },
+  { value: "CompanyName", label: "Company Name" },
+  { value: "Title", label: "Title (Mr/Mrs)" },
+  { value: "GivenName", label: "First Name" },
+  { value: "MiddleName", label: "Middle Name" },
+  { value: "FamilyName", label: "Last Name" },
+  { value: "Suffix", label: "Suffix (Jr/Sr)" },
+  { value: "PrintOnCheckName", label: "Print on Check As" },
+  { value: "PrimaryEmailAddr.Address", label: "Primary Email" },
+  { value: "WebAddr.URI", label: "Website" },
+  { value: "PrimaryPhone.FreeFormNumber", label: "Primary Phone" },
+  { value: "Mobile.FreeFormNumber", label: "Mobile Phone" },
+  { value: "Fax.FreeFormNumber", label: "Fax" },
+  { value: "AlternatePhone.FreeFormNumber", label: "Alternate Phone" },
+  { value: "BillAddr.Line1", label: "Billing Address Line 1" },
+  { value: "BillAddr.Line2", label: "Billing Address Line 2" },
+  { value: "BillAddr.Line3", label: "Billing Address Line 3" },
+  { value: "BillAddr.City", label: "Billing City" },
+  { value: "BillAddr.CountrySubDivisionCode", label: "Billing State/Province" },
+  { value: "BillAddr.PostalCode", label: "Billing ZIP/Postal" },
+  { value: "BillAddr.Country", label: "Billing Country" },
+  { value: "ShipAddr.Line1", label: "Shipping Address Line 1" },
+  { value: "ShipAddr.Line2", label: "Shipping Address Line 2" },
+  { value: "ShipAddr.City", label: "Shipping City" },
+  { value: "ShipAddr.CountrySubDivisionCode", label: "Shipping State/Province" },
+  { value: "ShipAddr.PostalCode", label: "Shipping ZIP/Postal" },
+  { value: "ShipAddr.Country", label: "Shipping Country" },
+  { value: "Notes", label: "Notes" },
+  { value: "Taxable", label: "Taxable (true/false)" },
+  { value: "Active", label: "Active (true/false)" },
+  { value: "CurrencyRef.value", label: "Currency Code (e.g. USD)" }
+];
+async function startQBOAuth() {
   const btn = document.getElementById('connect-qbo-btn');
   btn.disabled = true;
   btn.textContent = 'Opening QuickBooks...';
@@ -135,27 +190,25 @@
     btn.textContent = 'Connect to QuickBooks';
   }
 }
-    // === AUTHENTICATED FETCH HELPER ===
-    async function fetchWithAuth(url, options = {}) {
-      if (!Clerk.session) {
-        console.warn("No Clerk session yet");
-        return fetch(url, { ...options, credentials: "include" });
-      }
 
+
+    // === AUTH HELPER ===
+    async function fetchWithAuth(url, options = {}) {
+      if (!Clerk.session) return fetch(url, { ...options, credentials: "include" });
       try {
         const token = await Clerk.session.getToken();
-        const headers = {
-          ...options.headers,
-          Authorization: `Bearer ${token}`
-        };
-        return fetch(url, { ...options, headers, credentials: "include" });
+        return fetch(url, {
+          ...options,
+          headers: { ...options.headers, Authorization: `Bearer ${token}` },
+          credentials: "include"
+        });
       } catch (err) {
-        console.error("Token fetch failed:", err);
+        console.error("Token error:", err);
         return fetch(url, { ...options, credentials: "include" });
       }
     }
 
-    // === QUICKBOOKS STATUS ===
+    // === QBO STATUS & JOBS (keep your existing functions) ===
     async function updateQBOStatus() {
       try {
         const res = await fetchWithAuth('/api/jobs/test-qbo-connection');
@@ -215,147 +268,200 @@
 
     // === UPLOAD & PREVIEW ===
     async function uploadForPreview() {
-      const fileInput = document.getElementById('file');
-      const file = fileInput.files[0];
-      const type = document.getElementById('object_type').value;
+  const fileInput = document.getElementById('file');
+  const file = fileInput.files[0];
+  const type = document.getElementById('object_type').value;
 
-      if (!file) return alert("Please select a CSV file");
+  if (!file) return alert("Please select a CSV file");
 
-      const form = new FormData();
-      form.append('file', file);
+  const form = new FormData();
+  form.append('file', file);
 
-      try {
-        const res = await fetchWithAuth(`/api/import/${type}`, {
-          method: 'POST',
-          body: form
-        });
+  try {
+    const res = await fetchWithAuth(`/api/import/${type}`, {
+      method: 'POST',
+      body: form
+    });
 
-        if (!res.ok) {
-          const error = await res.text();
-          alert("Upload failed: " + error);
-          return;
-        }
+    if (!res.ok) throw new Error(await res.text());
 
-        const data = await res.json();
-        currentJobId = data.job_id;
-        csvHeaders = data.headers || [];
+    const data = await res.json();
+    currentJobId = data.job_id;
+    csvHeaders = data.headers || [];
+    previewRows = data.preview_rows || [];  // ← Now used!
 
-        document.getElementById('upload-section').style.display = 'none';
-        document.getElementById('mapping-section').style.display = 'block';
+    document.getElementById('upload-section').style.display = 'none';
+    document.getElementById('mapping-section').style.display = 'block';
 
-        const container = document.getElementById('mapping-fields');
-        container.innerHTML = csvHeaders.map(header => `
-          <div class="flex items-center gap-6 bg-gray-50 p-4 rounded-lg">
-            <div class="w-72 font-medium truncate">${header}</div>
-            <span class="text-gray-500">→</span>
-            <select class="mapping-select flex-1 px-4 py-2 border rounded bg-white" data-header="${header}">
-              <option value="">-- Not mapped --</option>
-              <option value="DisplayName">DisplayName *</option>
-              <option value="GivenName">First Name</option>
-              <option value="FamilyName">Last Name</option>
-              <option value="PrimaryEmailAddr">Email Address</option>
-              <option value="PrimaryPhone">Phone Number</option>
-              <option value="WebAddr">Website</option>
-              <option value="BillAddr">Billing Address (nested)</option>
-            </select>
-          </div>
-        `).join('');
+    renderMappingFields();     // ← Use the new dynamic renderer
+    autoMapColumns();          // ← Use the improved auto-mapping
+  } catch (err) {
+    alert("Upload failed: " + err.message);
+  }
+}
+    function renderMappingFields() {
+  const container = document.getElementById('mapping-fields');
+  container.innerHTML = csvHeaders.map(header => `
+    <div class="flex items-center gap-6 bg-gray-50 p-4 rounded-lg mapping-row">
+      <div class="w-72 font-medium truncate">${header}</div>
+      <span class="text-gray-500">→</span>
+      <select class="mapping-select flex-1 px-4 py-2 border rounded bg-white" data-header="${header}">
+        ${QBO_FIELDS.map(f => `<option value="${f.value}">${f.label}</option>`).join('')}
+      </select>
+      <button onclick="this.parentElement.remove(); checkRequiredFields()" class="text-red-600 hover:text-red-800">Remove</button>
+    </div>
+  `).join('');
 
-        // Smart mapping
-        document.querySelectorAll('.mapping-select').forEach(select => {
-          const h = select.dataset.header.toLowerCase();
-          if (h.includes('name') || h.includes('company') || h.includes('customer') || h.includes('business')) select.value = 'DisplayName';
-          else if (h.includes('email')) select.value = 'PrimaryEmailAddr';
-          else if (h.includes('phone')) select.value = 'PrimaryPhone';
-        });
+  // Add custom mapping button
+  container.innerHTML += `
+    <button onclick="addCustomMapping()" class="mt-6 px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700">
+      + Add Custom Mapping
+    </button>
+  `;
 
-        checkRequiredFields();
-      } catch (err) {
-        alert("Network error: " + err.message);
-      }
+  document.querySelectorAll('.mapping-select').forEach(checkRequiredFields);
+  document.getElementById('mapping-fields').addEventListener('change', checkRequiredFields);
+}
+
+    function addCustomMapping() {
+  const container = document.getElementById('mapping-fields');
+  const newRow = document.createElement('div');
+  newRow.className = 'flex items-center gap-6 bg-gray-50 p-4 rounded-lg mapping-row';
+  newRow.innerHTML = `
+    <input type="text" placeholder="New CSV Column Name" class="w-72 px-4 py-2 border rounded custom-header">
+    <span class="text-gray-500">→</span>
+    <select class="mapping-select flex-1 px-4 py-2 border rounded bg-white">
+      ${QBO_FIELDS.map(f => `<option value="${f.value}">${f.label}</option>`).join('')}
+    </select>
+    <button onclick="this.parentElement.remove(); checkRequiredFields()" class="text-red-600 hover:text-red-800">Remove</button>
+  `;
+  container.insertBefore(newRow, container.lastElementChild);
+}
+
+    function autoMapColumns() {
+  document.querySelectorAll('.mapping-select').forEach(select => {
+    const header = select.dataset.header?.toLowerCase() || document.querySelector('.custom-header')?.value.toLowerCase() || '';
+    if (!select.value) {
+      if (header.includes('display') || header.includes('name') || header.includes('company') || header.includes('customer')) select.value = 'DisplayName';
+      else if (header.includes('email')) select.value = 'PrimaryEmailAddr.Address';
+      else if (header.includes('phone') && !header.includes('mobile') && !header.includes('fax')) select.value = 'PrimaryPhone.FreeFormNumber';
+      else if (header.includes('mobile')) select.value = 'Mobile.FreeFormNumber';
+      else if (header.includes('fax')) select.value = 'Fax.FreeFormNumber';
+      else if (header.includes('website') || header.includes('web')) select.value = 'WebAddr.URI';
+      else if (header.includes('city')) select.value = 'BillAddr.City';
+      else if (header.includes('state') || header.includes('province')) select.value = 'BillAddr.CountrySubDivisionCode';
+      else if (header.includes('zip') || header.includes('postal')) select.value = 'BillAddr.PostalCode';
     }
-
+  });
+  checkRequiredFields();
+}
     function checkRequiredFields() {
-      const hasDisplayName = [...document.querySelectorAll('.mapping-select')].some(s => s.value === 'DisplayName');
-      const btn = document.getElementById('start-import-btn');
-      if (hasDisplayName) {
-        btn.disabled = false;
-        btn.classList.remove('opacity-50', 'cursor-not-allowed');
-      } else {
-        btn.disabled = true;
-        btn.classList.add('opacity-50', 'cursor-not-allowed');
-      }
-    }
+  const hasDisplayName = [...document.querySelectorAll('.mapping-select')].some(s => s.value === 'DisplayName');
+  const btn = document.getElementById('start-import-btn');
+  if (hasDisplayName) {
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+  } else {
+    btn.disabled = true;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
+  }
+}
 
-    document.getElementById('mapping-fields').addEventListener('change', checkRequiredFields);
 
-    async function startImport() {
-      const mapping = {};
-      document.querySelectorAll('.mapping-select').forEach(sel => {
-        if (sel.value) mapping[sel.dataset.header] = sel.value;
+    async function proceedToPreview() {
+      mapping = {};
+      document.querySelectorAll('.mapping-row').forEach(row => {
+        const headerInput = row.querySelector('.custom-header');
+        const header = headerInput ? headerInput.value.trim() : row.querySelector('.mapping-select').dataset.header;
+        const select = row.querySelector('.mapping-select');
+        if (header && select.value) {
+          mapping[header] = select.value;
+        }
       });
 
+      renderPreviewTable();
+      document.getElementById('mapping-section').style.display = 'none';
+      document.getElementById('preview-section').style.display = 'block';
+    }
+
+    function renderPreviewTable() {
+  const thead = document.querySelector('#preview-table thead');
+  const tbody = document.querySelector('#preview-table tbody');
+
+  thead.innerHTML = `<tr>
+    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+    ${csvHeaders.map(h => `<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${h}</th>`).join('')}
+  </tr>`;
+
+  tbody.innerHTML = previewRows.map((row, idx) => `
+    <tr>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${idx + 1}</td>
+      ${csvHeaders.map(header => {
+        const mappedPath = mapping[header] || '';
+        return `<td class="px-6 py-4 text-sm">
+          <input type="text" value="${(row[header] || '').replace(/"/g, '&quot;')}" 
+                 class="w-full px-2 py-1 border rounded bg-gray-50">
+          ${mappedPath ? `<div class="text-xs text-green-600 mt-1">→ ${mappedPath}</div>` : ''}
+        </td>`;
+      }).join('')}
+    </tr>
+  `).join('');
+}
+
+    function backToMapping() {
+      document.getElementById('preview-section').style.display = 'none';
+      document.getElementById('mapping-section').style.display = 'block';
+    }
+
+    async function startImport() {
       try {
         const res = await fetchWithAuth(`/api/import/customer/${currentJobId}/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(mapping)
         });
-
         if (!res.ok) throw new Error(await res.text());
-
-        alert("Import started! Watch progress in 'Recent Jobs'.");
-        document.getElementById('mapping-section').style.display = 'none';
-        document.getElementById('upload-section').style.display = 'block';
-        document.getElementById('file').value = '';
+        alert("Import started successfully!");
+        cancelPreview();
         loadJobs();
       } catch (err) {
-        alert("Import failed: " + err.message);
+        alert("Error: " + err.message);
       }
     }
 
     function cancelPreview() {
+      document.getElementById('preview-section').style.display = 'none';
       document.getElementById('mapping-section').style.display = 'none';
       document.getElementById('upload-section').style.display = 'block';
+      document.getElementById('file').value = '';
       currentJobId = null;
       csvHeaders = [];
-      document.getElementById('file').value = '';
-    }
-// === CLERK INITIALIZATION ===
-// === CLERK INITIALIZATION ===
-window.addEventListener('load', async () => {
-  if (typeof Clerk === 'undefined') {
-    console.error("Clerk.js failed to load");
-    document.getElementById('clerk-mount').innerHTML = '<span class="text-red-500">Clerk auth failed</span>';
-    return;
-  }
-
-  try {
-    await Clerk.load();
-
-    const authDiv = document.getElementById('clerk-mount');
-
-    if (Clerk.user) {
-      Clerk.mountUserButton(authDiv);
-      console.log("Signed in as", Clerk.user.id);
-    } else {
-      const btn = document.createElement('button');
-      btn.textContent = 'Sign In';
-      btn.className = 'px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm';
-      btn.onclick = () => Clerk.openSignIn();
-      authDiv.appendChild(btn);
+      previewRows = [];
+      mapping = {};
     }
 
-    // Start your app logic here (safe after load)
-    updateQBOStatus();
-    loadJobs();
-    setInterval(updateQBOStatus, 30000);
-    setInterval(loadJobs, 4000);
-  } catch (err) {
-    console.error("Clerk load failed:", err);
-    document.getElementById('clerk-mount').innerHTML = '<span class="text-red-500">Auth error</span>';
-  }
-});
+    // === CLERK INIT ===
+    window.addEventListener('load', async () => {
+      if (typeof Clerk === 'undefined') return alert("Clerk failed to load");
+
+      await Clerk.load();
+
+      const mountDiv = document.getElementById('clerk-mount');
+      if (Clerk.user) {
+        Clerk.mountUserButton(mountDiv);
+      } else {
+        const btn = document.createElement('button');
+        btn.textContent = 'Sign In';
+        btn.className = 'px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm';
+        btn.onclick = () => Clerk.openSignIn();
+        mountDiv.appendChild(btn);
+      }
+
+      updateQBOStatus();
+      loadJobs();
+      setInterval(updateQBOStatus, 30000);
+      setInterval(loadJobs, 5000);
+    });
   </script>
 </body>
 </html>

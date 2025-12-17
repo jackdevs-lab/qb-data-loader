@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: str
     CLERK_SECRET_KEY: str
 
-    CELERY_BROKER_URL: str = "dummy://"
-    CELERY_RESULT_BACKEND: str = "dummy://"
+    CELERY_BROKER_URL: str 
+    CELERY_RESULT_BACKEND: str 
 
 settings = Settings()
