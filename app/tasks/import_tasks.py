@@ -1,4 +1,5 @@
 # app/tasks/import_tasks.py
+
 import os
 import asyncio
 import io
@@ -9,12 +10,10 @@ import logging
 from typing import Dict, Any
 
 from app.core.websocket import manager
-
 from app.models.db import Job, JobRow, MappingTemplate
 from app.core.db import TORTOISE_ORM
-from app.schemas.validators import VALIDATORS
 from app.core.qbo import get_qbo_client
-
+from app.schemas.customer import CustomerCanonical, WebAddr, Phone, Email, Address
 logger = logging.getLogger(__name__)
 
 celery_app = Celery(
@@ -26,66 +25,88 @@ celery_app = Celery(
 celery_app.conf.update(task_track_started=True)
 
 
-def normalize_mapping_for_customer(
-    raw_mapping: Dict[str, str],
-    row_data: Dict[str, str]
-) -> Dict[str, Any]:
+def normalize_to_canonical(raw_mapping: Dict[str, str], row_data: Dict[str, str]) -> Dict[str, Any]:
     """
-    Converts frontend mapping {CSV column: QBO dotted path}
-    into a dict with keys matching the CustomerRow Pydantic model fields.
+    Maps CSV columns → properly structured data with model instances
+    expected by CustomerCanonical. Super robust and validator-friendly.
     """
-    normalized: Dict[str, Any] = {}
+    data: Dict[str, Any] = {}
 
     for csv_header, qbo_path in raw_mapping.items():
-        if csv_header not in row_data:
+        raw_value = row_data.get(csv_header, "").strip()
+        if not raw_value:
+            continue  # Skip empty values — let Pydantic defaults handle None
+
+        # === Scalar fields (direct assignment) ===
+        scalar_fields = {
+            "DisplayName",
+            "CompanyName",
+            "Title",
+            "GivenName",
+            "MiddleName",
+            "FamilyName",
+            "Suffix",
+            "Notes",
+            "Taxable",
+            "Active",
+            "Job",
+            "BillWithParent",
+            # Add CurrencyRef.value → CurrencyRef later if needed
+        }
+
+        if qbo_path in scalar_fields:
+            if qbo_path in {"Taxable", "Active", "Job", "BillWithParent"}:
+                data[qbo_path] = raw_value.lower() in ("true", "1", "yes", "y", "on")
+            else:
+                data[qbo_path] = raw_value
             continue
 
-        value = row_data[csv_header].strip()
-        if not value:  # Skip empty values
+        # === Nested model fields ===
+        if qbo_path == "PrimaryEmailAddr.Address":
+            data["PrimaryEmailAddr"] = Email(Address=raw_value)
             continue
 
-        # Direct required field
-        if qbo_path == "DisplayName":
-            normalized["DisplayName"] = value
+        if qbo_path == "WebAddr.URI":
+            data["WebAddr"] = WebAddr(URI=raw_value)  # Runs URL cleaning + validation early
+            continue
 
-        # Email
-        elif qbo_path == "PrimaryEmailAddr.Address":
-            normalized["PrimaryEmailAddr"] = value
+        if qbo_path in {
+            "PrimaryPhone.FreeFormNumber",
+            "Mobile.FreeFormNumber",
+            "Fax.FreeFormNumber",
+            "AlternatePhone.FreeFormNumber",
+        }:
+            field_name = qbo_path.split(".")[0]
+            data[field_name] = Phone(FreeFormNumber=raw_value)  # Runs phone cleaning
+            continue
 
-        # Primary Phone
-        elif qbo_path == "PrimaryPhone.FreeFormNumber":
-            normalized["PrimaryPhone"] = value
+        if qbo_path.startswith(("BillAddr.", "ShipAddr.")):
+            addr_type, field = qbo_path.split(".", 1)
+            if addr_type not in data:
+                data[addr_type] = {}
+            data[addr_type][field] = raw_value
+            continue
 
-        # Optional phone fields (add to model later if needed)
-        elif qbo_path == "Mobile.FreeFormNumber":
-            normalized["Mobile"] = value
+        # === Fallback: direct scalar (for future-proofing new fields) ===
+        data[qbo_path] = raw_value
 
-        elif qbo_path == "Fax.FreeFormNumber":
-            normalized["Fax"] = value
+    # === Final step: Convert partial address dicts to Address model instances ===
+    for addr_key in ("BillAddr", "ShipAddr"):
+        if addr_key in data and isinstance(data[addr_key], dict):
+            try:
+                data[addr_key] = Address(**data[addr_key])  # Validates + cleans all fields
+            except Exception as e:
+                # In real use, you could log this, but since validation happens later anyway,
+                # just leave as dict — Pydantic will catch and report properly
+                pass
 
-        elif qbo_path == "AlternatePhone.FreeFormNumber":
-            normalized["AlternatePhone"] = value
-
-        # Website
-        elif qbo_path == "WebAddr.URI":
-            normalized["WebAddr"] = value
-
-        # Billing Address fields
-        elif qbo_path.startswith("BillAddr."):
-            field_part = qbo_path[len("BillAddr."):]  # e.g. "City", "Line1"
-            internal_key = f"BillAddr_{field_part}"
-            normalized[internal_key] = value
-
-        # You can extend this for ShipAddr, Notes, Taxable, etc. as needed
-
-    return normalized
+    return data
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str):
     async def run():
         await Tortoise.init(config=TORTOISE_ORM)
-
         job = await Job.get(id=job_id)
 
         async def get_progress():
@@ -96,186 +117,122 @@ def import_valid_rows_task(self, job_id: int, csv_content: str, object_type: str
                 "success": await JobRow.filter(job=job, status="success").count(),
             }
 
-        # === Initial broadcast: parsing ===
+        # === Parsing ===
         job.status = "parsing"
-        await manager.broadcast(
-            {
-                "status": job.status,
-                "progress": await get_progress(),
-                "meta": job.meta,
-            },
-            job.id,
-        )
+        await manager.broadcast({"status": job.status, "progress": await get_progress(), "meta": job.meta}, job.id)
         await job.save()
 
-        # === 1. Parse CSV ===
         reader = csv.DictReader(io.StringIO(csv_content))
         rows = list(reader)
 
-        logger.info(f"Parsed {len(rows)} rows from CSV")
-
-        job_rows = []
-        for idx, row in enumerate(rows, start=2):
-            job_rows.append(
-                JobRow(
-                    job=job,
-                    row_number=idx,
-                    raw_data=row,
-                    status="pending",
-                )
-            )
+        job_rows = [
+            JobRow(job=job, row_number=idx + 2, raw_data=row, status="pending")
+            for idx, row in enumerate(rows)
+        ]
         await JobRow.bulk_create(job_rows)
-
-        logger.info(f"Created {len(job_rows)} new JobRow entries in database")
 
         job.meta["row_count"] = len(rows)
         job.status = "validating"
-
-        await manager.broadcast(
-            {
-                "status": job.status,
-                "progress": await get_progress(),
-                "meta": job.meta,
-            },
-            job.id,
-        )
+        await manager.broadcast({"status": job.status, "progress": await get_progress(), "meta": job.meta}, job.id)
         await job.save()
 
-        # === 2. Validate ===
-        validator_class = VALIDATORS.get(object_type)
-        if not validator_class:
-            logger.error(f"No validator found for {object_type}")
+        # === Validation using NEW canonical schema ===
+        if object_type != "customer":
             job.status = "error"
-            job.meta["error"] = f"No validator found for object_type '{object_type}'"
-            await manager.broadcast(
-                {
-                    "status": job.status,
-                    "progress": await get_progress(),
-                    "meta": job.meta,
-                },
-                job.id,
-            )
+            job.meta["error"] = f"Unsupported object_type: {object_type}"
             await job.save()
+            await manager.broadcast({"status": job.status, "meta": job.meta}, job.id)
             return
 
         mapping = job.meta.get("mapping", {})
 
-        # Optional: load from saved template (existing logic preserved)
+        # Load saved mapping template if needed
         mapping_id = job.meta.get("mapping_id")
         if mapping_id and not mapping:
             template = await MappingTemplate.get_or_none(id=mapping_id, user=await job.user)
-            if template and template.object_type.lower() == object_type.lower():
+            if template and template.object_type.lower() == "customer":
                 mapping = template.mapping
 
         valid_count = 0
         current_rows = await JobRow.filter(job=job).all()
 
-        validator_fields = set(validator_class.model_fields.keys())
-
         for jrow in current_rows:
             raw = jrow.raw_data
-
-            # === NEW: Correct mapping using normalizer ===
-            data_for_model = normalize_mapping_for_customer(mapping, raw)
-
-            # Fallback: exact CSV column name matches model field
-            for col, val in raw.items():
-                cleaned = val.strip()
-                if cleaned and col in validator_fields and col not in data_for_model:
-                    data_for_model[col] = cleaned
-
-            logger.info(f"Mapped data: {data_for_model}")
+            data_for_model = normalize_to_canonical(mapping, raw)
 
             try:
-                validated = validator_class(**data_for_model)
-                jrow.payload = validated.model_dump(exclude_unset=True, exclude_none=True)
+                # This triggers full Pydantic validation + cleaning
+                customer = CustomerCanonical(**data_for_model)
+
+                # Use our custom method to get QBO-ready payload
+                jrow.payload = customer.to_qbo_payload()
                 jrow.status = "valid"
                 valid_count += 1
                 logger.info(f"Row {jrow.row_number} validated successfully")
+
             except Exception as e:
-                logger.error(f"VALIDATION FAILED for row {jrow.row_number}: {e}")
-                logger.error(f"Mapped data was: {data_for_model}")
+                logger.error(f"Validation failed for row {jrow.row_number}: {e}")
+                logger.error(f"Data: {data_for_model}")
                 jrow.status = "error"
                 jrow.error = str(e)
+
             await jrow.save()
 
         job.meta["valid_count"] = valid_count
         job.status = "importing"
-
-        await manager.broadcast(
-            {
-                "status": job.status,
-                "progress": await get_progress(),
-                "meta": job.meta,
-            },
-            job.id,
-        )
+        await manager.broadcast({"status": job.status, "progress": await get_progress(), "meta": job.meta}, job.id)
         await job.save()
 
-        # === 3. Import to QBO ===
+        # === Import valid rows to QBO ===
         user = await job.user
         client = await get_qbo_client(user)
         success = 0
-
         valid_rows = await JobRow.filter(job=job, status="valid").all()
-        logger.info(f"Starting import of {len(valid_rows)} valid rows for job {job_id}")
 
         for row in valid_rows:
-            payload_to_send = row.payload
-
-            logger.info(f"Attempting to create {object_type} for row {row.row_number} with payload: {payload_to_send}")
+            payload = row.payload
 
             try:
-                resp = await client.post(
-                    f"/{object_type.lower()}?minorversion=75",
-                    json=payload_to_send
-                )
-
-                logger.info(f"QBO Response Status for row {row.row_number}: {resp.status_code}")
-                logger.info(f"QBO Response Body for row {row.row_number}: {resp.text}")
+                resp = await client.post(f"/customer?minorversion=75", json=payload)
 
                 if resp.status_code in (200, 201):
-                    try:
-                        response_json = resp.json()
-                        qbo_obj = response_json.get(object_type.capitalize(), {}) or response_json.get("Customer", {})
-                        qbo_id = qbo_obj.get("Id")
-                        sync_token = qbo_obj.get("SyncToken", 0)
+                    resp_json = resp.json()
+                    customer_obj = resp_json.get("Customer", {})
+                    qbo_id = customer_obj.get("Id")
+                    sync_token = customer_obj.get("SyncToken", 0)
 
-                        row.status = "success"
-                        row.meta = {"qbo_id": qbo_id, "sync_token": sync_token}
-                        success += 1
-                        logger.info(f"Successfully created {object_type} - QBO ID: {qbo_id}")
-                    except Exception as json_e:
-                        logger.error(f"Failed to parse success JSON for row {row.row_number}: {json_e}")
-                        row.status = "error"
-                        row.error = f"JSON parse error: {str(json_e)}"
+                    row.status = "success"
+                    row.meta = {"qbo_id": qbo_id, "sync_token": sync_token}
+                    success += 1
                 else:
-                    error_detail = resp.text or "Empty response body"
-                    logger.error(f"QBO API ERROR for row {row.row_number} - Status {resp.status_code}: {error_detail}")
-                    row.status = "error"
-                    row.error = f"QBO {resp.status_code}: {error_detail[:500]}"
+                    try:
+                        fault_data = resp.json()
+                        fault = fault_data.get("Fault", {})
+                        errors = fault.get("Error", [])
+                        if errors:
+                            err = errors[0]
+                            message = err.get("Message", "Unknown error")
+                            code = err.get("code", "Unknown")
+                            detail = err.get("Detail", "")
+                            full_error = f"{message} (Code: {code}) — {detail}"
+                        else:
+                            full_error = resp.text[:1000]
+                    except Exception:
+                        full_error = resp.text[:1000]
 
+                    row.status = "error"
+                    row.error = f"QBO {resp.status_code}: {full_error}"
+                    logger.error(f"QBO Create Failed (Row {row.row_number}): {full_error}")
             except Exception as e:
-                logger.exception(f"Network/exception error importing row {row.row_number}")
                 row.status = "error"
                 row.error = f"Request failed: {str(e)}"
 
             await row.save()
 
-        # === Final status ===
-        total_valid = len(valid_rows)
-        job.status = "completed" if success == total_valid else "partial_success"
-
-        job.meta.update({"success_count": success, "valid_count": total_valid})
-
-        await manager.broadcast(
-            {
-                "status": job.status,
-                "progress": await get_progress(),
-                "meta": job.meta,
-            },
-            job.id,
-        )
+        # === Final ===
+        job.status = "completed" if success == len(valid_rows) else "partial_success"
+        job.meta.update({"success_count": success})
+        await manager.broadcast({"status": job.status, "progress": await get_progress(), "meta": job.meta}, job.id)
         await job.save()
 
         await client.aclose()
