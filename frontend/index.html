@@ -118,6 +118,7 @@
   // === GLOBALS ===
   const jobsEl = document.getElementById('jobs');
   let currentJobId = null;
+  let hasUnvalidatedChanges = false;
   let csvHeaders = [];
   let previewRows = [];
   let mapping = {};
@@ -440,117 +441,247 @@ function checkRequiredFields() {
     const thead = document.querySelector('#preview-table thead');
     const tbody = document.querySelector('#preview-table tbody');
 
-    thead.innerHTML = `<tr>
-      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
-      ${csvHeaders.map(h => `<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${h}</th>`).join('')}
-    </tr>`;
+    thead.innerHTML = `
+      <tr>
+        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+        <th class="px-6 py-3 text-left text-xs font-medium text-red-700 uppercase tracking-wider">Issues</th>
+        ${csvHeaders.map(h => `<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${h}</th>`).join('')}
+      </tr>`;
 
     tbody.innerHTML = previewRows.map((row, idx) => `
-      <tr class="hover:bg-gray-50">
-        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${idx + 1}</td>
-        ${csvHeaders.map(header => {
-          const mappedPath = mapping[header] || '';
-          return `<td class="px-6 py-4 text-sm">
-            <input type="text" value="${(row[header] || '').replace(/"/g, '&quot;')}" 
-                   class="w-full px-2 py-1 border border-gray-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                   oninput="handleCellEdit(this, ${idx}, '${header}')">
-            ${mappedPath ? `<div class="text-xs text-green-600 mt-1">→ ${mappedPath}</div>` : ''}
-          </td>`;
-        }).join('')}
-      </tr>
-    `).join('');
-  }
-
-  function renderPreviewTableWithValidation(validationRows) {
-    currentValidation = {};
-    validationRows.forEach(r => {
-      currentValidation[r.row_number] = {
-        status: r.status,
-        issues: r.issues || []
-      };
-    });
-
-    const tbody = document.querySelector('#preview-table tbody');
-    tbody.innerHTML = previewRows.map((row, idx) => {
-      const rowNum = idx + 2;
-      const val = currentValidation[rowNum] || { status: "valid", issues: [] };
-      
-      // Filter out duplicate errors if override is enabled
-      let filteredIssues = val.issues;
-      if (overrideDuplicates) {
-        filteredIssues = val.issues.filter(iss => iss.code !== "qbo_duplicate_displayname");
-      }
-      const effectiveStatus = filteredIssues.length === 0 ? "valid" : "error";
-
-      const rowClass = effectiveStatus === "valid" ? "bg-green-50" : "bg-red-50 border-l-4 border-red-500";
-
-      const fieldIssues = {};
-      filteredIssues.forEach(iss => {
-        const field = iss.field || "General";
-        fieldIssues[field] = fieldIssues[field] || [];
-        fieldIssues[field].push(iss.message);
-      });
-
-      return `<tr class="${rowClass}">
-        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${effectiveStatus === "valid" ? 'text-green-900' : 'text-red-900'}">
-          ${idx + 1}
-          ${effectiveStatus === "valid" ? '<span class="ml-2 text-green-600">✓</span>' : '<span class="ml-2 text-red-600">✗</span>'}
-        </td>
-        <td class="px-6 py-4 text-sm align-top">
-          ${filteredIssues.filter(iss => !iss.field || iss.field === "General" || !Object.keys(fieldIssues).includes(iss.field))
-          .map(iss => `<div class="text-xs text-red-600 font-medium">⚠ ${iss.message}</div>`)
-          .join('')}
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
+        ${idx + 1}
       </td>
-        ${csvHeaders.map(header => {
-          const mappedPath = mapping[header] || '';
-          const issues = fieldIssues[mappedPath] || [];
-          const cellClass = issues.length > 0 ? "bg-red-100" : "";
-
-          return `<td class="px-6 py-4 text-sm ${cellClass}">
-            <input type="text" value="${(row[header] || '').replace(/"/g, '&quot;')}" 
-                   class="w-full px-2 py-1 border rounded ${issues.length > 0 ? 'border-red-400' : 'border-gray-300'} focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                   oninput="handleCellEdit(this, ${idx}, '${header}')">
-            ${mappedPath ? `<div class="text-xs text-gray-600 mt-1">→ ${mappedPath}</div>` : ''}
-            ${issues.length > 0 ? `<div class="text-xs text-red-600 mt-1 font-medium">⚠ ${issues.join('; ')}</div>` : ''}
-          </td>`;
-        }).join('')}
-      </tr>`;
-    }).join('');
+      <td class="px-6 py-4 text-sm text-gray-400 italic">
+        None
+      </td>
+      ${csvHeaders.map(header => {
+        const mappedPath = mapping[header] || '';
+        return `<td class="px-6 py-4 text-sm">
+          <input type="text" 
+                 value="${(row[header] || '').replace(/"/g, '&quot;')}" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow"
+                 oninput="handleCellEdit(this, ${idx}, '${header}')">
+          ${mappedPath ? `<div class="text-xs text-green-600 mt-1 font-medium">→ ${mappedPath}</div>` : ''}
+        </td>`;
+      }).join('')}
+    </tr>
+  `).join('');
   }
 
-  async function startDryRun() {
-    if (!mapping || Object.keys(mapping).length === 0) {
-      alert("Please complete mapping first");
-      return;
+
+function updateDryRunButton() {
+  const btn = document.getElementById('dry-run-btn');
+  if (hasUnvalidatedChanges) {
+    btn.textContent = "Validate Changes ⚡";
+    btn.classList.add('animate-pulse', 'ring-4', 'ring-indigo-300', 'bg-indigo-700');
+  } else {
+    btn.textContent = currentValidation ? "Re-run Dry Run" : "Run Dry Run Simulation";
+    btn.classList.remove('animate-pulse', 'ring-4', 'ring-indigo-300', 'bg-indigo-700');
+  }
+}
+
+function handleCellEdit(inputElement, rowIndex, header) {
+  const newValue = inputElement.value.trim();
+  const oldValue = (previewRows[rowIndex][header] || '').trim();
+
+  if (newValue !== oldValue) {
+    previewRows[rowIndex][header] = newValue;
+    hasUnvalidatedChanges = true;
+    updateDryRunButton();
+
+    // Immediately disable import until re-validated
+    document.getElementById('start-real-import-btn').disabled = true;
+  }
+}
+
+function renderPreviewTableWithValidation(validationRows) {
+  // Store validation state
+  currentValidation = {};
+  validationRows.forEach(r => {
+    currentValidation[r.row_number] = {
+      status: r.status,
+      issues: r.issues || []
+    };
+  });
+
+  // User made edits → now validated → reset flag
+  hasUnvalidatedChanges = false;
+  updateDryRunButton();
+
+  const thead = document.querySelector('#preview-table thead');
+  const tbody = document.querySelector('#preview-table tbody');
+
+  // Header with dedicated "Issues" column
+  thead.innerHTML = `
+    <tr>
+      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+      <th class="px-6 py-3 text-left text-xs font-medium text-red-700 uppercase tracking-wider">Issues</th>
+      ${csvHeaders.map(h => `
+        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${h}</th>
+      `).join('')}
+    </tr>`;
+
+  tbody.innerHTML = previewRows.map((row, idx) => {
+    const rowNum = idx + 2; // actual CSV row number
+    const val = currentValidation[rowNum] || { status: "valid", issues: [] };
+
+    // Apply override for both QBO and local duplicates
+    let filteredIssues = val.issues;
+    if (overrideDuplicates) {
+      filteredIssues = val.issues.filter(iss =>
+        iss.code !== "qbo_duplicate_displayname" &&
+        iss.code !== "local_duplicate_displayname"
+      );
     }
 
-    const payload = { mapping: mapping };
+    const effectiveStatus = filteredIssues.length === 0 ? "valid" : "error";
+    const rowClass = effectiveStatus === "valid"
+      ? "bg-green-50 hover:bg-green-100"
+      : "bg-red-50 border-l-4 border-red-600 hover:bg-red-100";
 
-    try {
-      const res = await fetchWithAuth(`/api/import/customer/${currentJobId}/dry-run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+    // Group issues by field — with normalization
+    const fieldIssues = {};
+    filteredIssues.forEach(iss => {
+      let field = iss.field || "General";
 
-      if (!res.ok) throw new Error(await res.text() || "Dry run failed");
+      // Normalize common Pydantic quirks
+      if (field === "PrimaryEmailAddr") field = "PrimaryEmailAddr.Address";
+      if (field === "PrimaryPhone") field = "PrimaryPhone.FreeFormNumber";
+      if (field === "Mobile") field = "Mobile.FreeFormNumber";
+      if (field === "Fax") field = "Fax.FreeFormNumber";
+      if (field === "AlternatePhone") field = "AlternatePhone.FreeFormNumber";
+      if (field === "WebAddr") field = "WebAddr.URI";
 
-      const data = await res.json();
+      fieldIssues[field] = fieldIssues[field] || [];
+      fieldIssues[field].push(iss.message);
+    });
 
-      document.getElementById('validation-summary').classList.remove('hidden');
-      document.getElementById('dry-run-btn').textContent = "Re-run Dry Run";
-      document.getElementById('start-real-import-btn').classList.remove('hidden');
+    // General issues (no field assigned)
+    const generalIssues = (fieldIssues["General"] || [])
+      .map(msg => `<div class="text-xs text-red-700 font-medium mb-1">⚠ ${msg}</div>`)
+      .join('') || '<span class="text-gray-400 text-xs">None</span>';
 
-      const s = data.summary;
-      document.getElementById('total-count').textContent = s.total_rows;
-      document.getElementById('success-count').textContent = s.will_succeed;
-      document.getElementById('fail-count').textContent = s.will_fail;
-      document.getElementById('warning-count').textContent = s.warnings;
+    delete fieldIssues["General"]; // Remove so it doesn't leak into cells
 
-      // Update override state
+    return `<tr class="${rowClass}">
+      <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${effectiveStatus === "valid" ? 'text-green-900' : 'text-red-900'}">
+        ${idx + 1}
+        ${effectiveStatus === "valid"
+          ? '<span class="ml-3 text-green-600 font-bold">✓</span>'
+          : '<span class="ml-3 text-red-600 font-bold">✗</span>'
+        }
+      </td>
+      <td class="px-6 py-4 text-sm align-top max-w-xs">
+        ${generalIssues}
+      </td>
+      ${csvHeaders.map(header => {
+        const mappedPath = mapping[header] || '';
+        let issues = fieldIssues[mappedPath] || [];
+
+        // Fallback: partial match (e.g. mappedPath ends with field name)
+        if (issues.length === 0 && mappedPath) {
+          for (const [key, msgs] of Object.entries(fieldIssues)) {
+            if (mappedPath.includes(key) || key.includes(mappedPath)) {
+              issues = msgs;
+              break;
+            }
+          }
+        }
+
+        const hasError = issues.length > 0;
+        const cellBg = hasError ? "bg-red-100" : "";
+        const borderColor = hasError ? "border-red-500 ring-red-200" : "border-gray-300";
+
+        return `<td class="px-6 py-4 text-sm ${cellBg}">
+          <input type="text"
+                 value="${(row[header] || '').replace(/"/g, '&quot;')}"
+                 class="w-full px-3 py-2 border rounded ${borderColor} bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                 oninput="handleCellEdit(this, ${idx}, '${header}')">
+          ${mappedPath ? `<div class="text-xs text-gray-600 mt-1">→ ${mappedPath}</div>` : ''}
+          ${hasError
+            ? `<div class="text-xs text-red-700 font-medium mt-2 flex items-start">
+                 <span class="mr-1">⚠</span>
+                 <span>${issues.join('<br>')}</span>
+               </div>`
+            : ''
+          }
+        </td>`;
+      }).join('')}
+    </tr>`;
+  }).join('');
+}
+
+async function startDryRun() {
+  if (!mapping || Object.keys(mapping).length === 0) {
+    alert("Please complete mapping first");
+    return;
+  }
+
+  const payload = {
+    mapping: mapping,
+    rows: previewRows  // ← Sends all current cell values (including user edits)
+  };
+
+  try {
+    const res = await fetchWithAuth(`/api/import/customer/${currentJobId}/dry-run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error(await res.text() || "Dry run failed");
+
+    const data = await res.json();
+
+    // ←←← MOVE THIS LINE UP HERE — declare s first!
+    const s = data.summary;
+
+    document.getElementById('validation-summary').classList.remove('hidden');
+    document.getElementById('dry-run-btn').textContent = "Re-run Dry Run";
+    document.getElementById('start-real-import-btn').classList.remove('hidden');
+
+    // Now safe to use s everywhere
+    document.getElementById('total-count').textContent = s.total_rows;
+    document.getElementById('success-count').textContent = s.will_succeed;
+    document.getElementById('fail-count').textContent = s.will_fail;
+    document.getElementById('warning-count').textContent = s.warnings;
+
+    // Update override state
+    overrideDuplicates = document.getElementById('override-duplicates').checked;
+
+    if (s.will_fail === 0 || (overrideDuplicates && s.will_fail <= (s.warnings || 0))) {
+      document.getElementById('summary-text').textContent = "🎉 Ready to import!";
+      document.getElementById('validation-summary').className = "mb-8 p-6 rounded-lg border bg-green-50 border-green-300";
+      document.getElementById('start-real-import-btn').textContent = "Confirm & Start Import";
+      document.getElementById('start-real-import-btn').className = "px-8 py-4 bg-green-600 text-white text-lg rounded hover:bg-green-700";
+    } else {
+      document.getElementById('summary-text').textContent = "⚠️ Some rows have issues. Edit them or override duplicates.";
+      document.getElementById('validation-summary').className = "mb-8 p-6 rounded-lg border bg-orange-50 border-orange-300";
+      document.getElementById('start-real-import-btn').textContent = "Import Safe Rows Only";
+      document.getElementById('start-real-import-btn').className = "px-8 py-4 bg-orange-600 text-white text-lg rounded hover:bg-orange-700";
+    }
+
+    // Only enable import if truly safe (or duplicates overridden meaningfully)
+    const effectiveFailCount = overrideDuplicates 
+      ? Math.max(0, s.will_fail - (s.warnings || 0)) 
+      : s.will_fail;
+    document.getElementById('start-real-import-btn').disabled = effectiveFailCount > 0;
+
+    renderPreviewTableWithValidation(data.rows);
+
+    // Re-run render when override checkbox changes
+    document.getElementById('override-duplicates').onchange = () => {
       overrideDuplicates = document.getElementById('override-duplicates').checked;
+      renderPreviewTableWithValidation(data.rows);
 
-      if (s.will_fail === 0 || (overrideDuplicates && s.will_fail <= (s.warnings || 0))) {
+      // Re-calculate button state and summary text
+      const newEffectiveFail = overrideDuplicates 
+        ? Math.max(0, s.will_fail - (s.warnings || 0)) 
+        : s.will_fail;
+
+      if (newEffectiveFail === 0) {
         document.getElementById('summary-text').textContent = "🎉 Ready to import!";
         document.getElementById('validation-summary').className = "mb-8 p-6 rounded-lg border bg-green-50 border-green-300";
         document.getElementById('start-real-import-btn').textContent = "Confirm & Start Import";
@@ -561,47 +692,38 @@ function checkRequiredFields() {
         document.getElementById('start-real-import-btn').textContent = "Import Safe Rows Only";
         document.getElementById('start-real-import-btn').className = "px-8 py-4 bg-orange-600 text-white text-lg rounded hover:bg-orange-700";
       }
-      document.getElementById('start-real-import-btn').disabled = false;
-
-      renderPreviewTableWithValidation(data.rows);
-
-      // Re-run render when checkbox changes
-      document.getElementById('override-duplicates').onchange = () => {
-        overrideDuplicates = document.getElementById('override-duplicates').checked;
-        renderPreviewTableWithValidation(data.rows);
-        // Update summary and button based on new effective status
-        startDryRun(); // lightweight re-calc
-      };
-
-    } catch (err) {
-      alert("Dry run failed: " + err.message);
-    }
-  }
-
-  async function startRealImport() {
-    if (!confirm("This will import data into QuickBooks. Continue?")) return;
-
-    const payload = {
-      mapping: mapping,
-      override_existing: document.getElementById('override-duplicates').checked
+      document.getElementById('start-real-import-btn').disabled = newEffectiveFail > 0;
     };
 
-    try {
-      const res = await fetchWithAuth(`/api/import/customer/${currentJobId}/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) throw new Error(await res.text());
-
-      alert("Import started successfully! Check 'Recent Jobs' for progress.");
-      cancelPreview();
-      loadJobs();
-    } catch (err) {
-      alert("Import failed: " + err.message);
-    }
+  } catch (err) {
+    alert("Dry run failed: " + err.message);
   }
+}
+  async function startRealImport() {
+  if (!confirm("This will import data into QuickBooks. Continue?")) return;
+
+  const payload = {
+    mapping: mapping,
+    rows: previewRows,  // ← Send final edited data
+    override_existing: document.getElementById('override-duplicates').checked
+  };
+
+  try {
+    const res = await fetchWithAuth(`/api/import/customer/${currentJobId}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    alert("Import started successfully! Check 'Recent Jobs' for progress.");
+    cancelPreview();
+    loadJobs();
+  } catch (err) {
+    alert("Import failed to start: " + err.message);
+  }
+}
 
   // === CLERK INIT ===
   window.addEventListener('load', async () => {
