@@ -28,6 +28,7 @@ const APP_STATE = {
 };
 
 // QBO Fields (from original code, expanded)
+const AI_FIELDS = QBO_FIELDS;
 const QBO_FIELDS = [ 
   { value: "", label: "-- Not mapped --" },
   { value: "DisplayName", label: "DisplayName * (Required)" },
