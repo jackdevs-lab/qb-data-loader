@@ -1,8 +1,3 @@
-// ============================================
-// MAIN APPLICATION CONTROLLER
-// ============================================
-
-// Global state and configuration
 const APP_STATE = {
   currentSection: 'dashboard',
   currentSubSection: null,
