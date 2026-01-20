@@ -1,36 +1,68 @@
 import { APP_STATE } from './state.js';
-import { showLoading, showError } from './utils.js';
-import * as loaders from './loaders/index.js';  // Assume index.js exports all loaders
+import { showLoading, showToast } from './utils.js';
+import { updateQBOStatus } from './helpers.js';
+import * as loaders from './loaders/index.js';
 
-export function loadSection(section, subSection = null) {
+export async function loadSection(section, subSection = null) {
   APP_STATE.currentSection = section;
   APP_STATE.currentSubSection = subSection;
-
+ 
+  // Update active navigation
   document.querySelectorAll('.nav-link').forEach(link => {
-    link.classList.toggle('text-blue-600 font-bold', link.dataset.section === section);
+    link.classList.remove('text-blue-600', 'font-bold');
+    if (link.dataset.section === section) {
+      link.classList.add('text-blue-600', 'font-bold');
+    }
   });
-
+ 
+  // Update sidebar
   updateSidebar(section, subSection);
+ 
+  // Load content
   showLoading();
-
-  const loaderMap = {
-    dashboard: loaders.loadDashboard,
-    customers: () => loaders.loadCustomersSection(subSection),
-    products: () => loaders.loadProductsSection(subSection),
-    reports: () => loaders.loadReportsSection(subSection),
-    jobs: loaders.loadJobsSection
-  };
-
-  (loaderMap[section] || loaders.loadDashboard)()
-    .catch(error => {
-      console.error(`Error loading ${section}:`, error);
-      showError('content-container', error.message || 'Please try again later.');
-    });
+ 
+  try {
+    switch(section) {
+      case 'dashboard':
+        await loaders.loadDashboard();
+        break;
+      case 'customers':
+        await loaders.loadCustomersSection(subSection);
+        break;
+      case 'products':
+        await loaders.loadProductsSection(subSection);
+        break;
+      case 'reports':
+        await loaders.loadReportsSection(subSection);
+        break;
+      case 'jobs':
+        await loaders.loadJobsSection();
+        break;
+      default:
+        await loaders.loadDashboard();
+    }
+  } catch (error) {
+    console.error(`Error loading ${section}:`, error);
+    document.getElementById('content-container').innerHTML = `
+      <div class="bg-red-50 border-l-4 border-red-500 p-6 rounded">
+        <div class="flex items-center">
+          <div class="text-red-500 text-2xl mr-3">
+            <i class="fas fa-exclamation-triangle"></i>
+          </div>
+          <div>
+            <h3 class="text-lg font-medium text-red-800">Error Loading Content</h3>
+            <p class="text-red-700 mt-1">${error.message || 'Please try again later.'}</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 }
-function updateSidebar(section, subSection) {
+
+export function updateSidebar(section, subSection) {
   const sidebarNav = document.getElementById('sidebar-nav');
   let sidebarHTML = '';
-  
+ 
   switch(section) {
     case 'dashboard':
       sidebarHTML = `
@@ -43,7 +75,7 @@ function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-      
+     
     case 'customers':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Customers</h3>
@@ -58,7 +90,7 @@ function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-      
+     
     case 'products':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Products & Services</h3>
@@ -70,7 +102,7 @@ function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-      
+     
     case 'reports':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Reports</h3>
@@ -85,7 +117,7 @@ function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-      
+     
     case 'jobs':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Import Jobs</h3>
@@ -98,9 +130,9 @@ function updateSidebar(section, subSection) {
       `;
       break;
   }
-  
+ 
   sidebarNav.innerHTML = sidebarHTML;
-  
+ 
   // Add event listeners to sidebar links
   sidebarNav.querySelectorAll('a').forEach(link => {
     link.addEventListener('click', (e) => {
@@ -110,3 +142,37 @@ function updateSidebar(section, subSection) {
     });
   });
 }
+
+export function updateUIForAuthState() {
+  const isAuthenticated = !!Clerk.user;
+ 
+  if (isAuthenticated) {
+    // User is logged in - show app
+    document.getElementById('landing-page').classList.add('hidden');
+    document.getElementById('app-container').classList.remove('hidden');
+    document.getElementById('sidebar').classList.remove('hidden');
+   
+    // Initialize Clerk user button
+    const mountDiv = document.getElementById('clerk-mount');
+    mountDiv.innerHTML = '';
+    Clerk.mountUserButton(mountDiv);
+   
+    // Load initial section
+    loadSection('dashboard');
+   
+    // Update QBO status and load jobs
+    updateQBOStatus();
+    setInterval(updateQBOStatus, 30000);
+   
+  } else {
+    // User is not logged in - show landing page
+    document.getElementById('landing-page').classList.remove('hidden');
+    document.getElementById('app-container').classList.add('hidden');
+   
+    // Setup landing page buttons
+    document.getElementById('landing-signin-btn').onclick = () => Clerk.openSignIn();
+    document.getElementById('landing-signup-btn').onclick = () => Clerk.openSignUp();
+    document.getElementById('landing-get-started').onclick = () => Clerk.openSignUp();
+  }
+}
+window.dispatchEvent(new CustomEvent('navigation-ready'));
