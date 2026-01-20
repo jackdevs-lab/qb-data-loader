@@ -3,10 +3,13 @@ export const APP_STATE = {
   currentSubSection: null,
   isAuthenticated: false,
   qboConnected: false,
+  currentCustomer: null,
+  currentProduct: null,
   customers: [],
   products: [],
   jobs: [],
   reports: {},
+  // Existing import state (from original code)
   currentJobId: null,
   hasUnvalidatedChanges: false,
   csvHeaders: [],
@@ -18,7 +21,8 @@ export const APP_STATE = {
   lastDryRunSummary: null,
   lastDryRunRows: null
 };
-export  const QBO_FIELDS = [ 
+// QBO Fields (from original code, expanded)
+export const QBO_FIELDS = [
   { value: "", label: "-- Not mapped --" },
   { value: "DisplayName", label: "DisplayName * (Required)" },
   { value: "CompanyName", label: "Company Name" },
@@ -52,6 +56,7 @@ export  const QBO_FIELDS = [
   { value: "Active", label: "Active (true/false)" },
   { value: "CurrencyRef.value", label: "Currency Code (e.g. USD)" }
 ];
+// Product fields
 export const PRODUCT_FIELDS = [
   { value: "Name", label: "Product/Service Name *" },
   { value: "Description", label: "Description" },
@@ -64,3 +69,4 @@ export const PRODUCT_FIELDS = [
   { value: "Taxable", label: "Taxable" },
   { value: "Active", label: "Active" }
 ];
+export const AI_FIELDS = QBO_FIELDS;
