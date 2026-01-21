@@ -1,4 +1,4 @@
-# app/api/reports.py (Updated with Query-Based Fallbacks)
+# app/api/reports.py (Updated with Query-Based Fallbacks and Robust Parsing)
 from fastapi import APIRouter, Depends, Query, HTTPException
 from app.core.auth import get_current_user
 from app.models.db import User
@@ -72,39 +72,61 @@ async def get_profit_loss(
         income = []
         expenses = []
         summary = {"totalIncome": 0, "totalExpenses": 0, "netProfit": 0}
-        if "Rows" in data and "Row" in data["Rows"]:
-            for section in data["Rows"]["Row"]:
-                header_value = section.get("Header", {}).get("ColData", [{}])[0].get("value")
-                if header_value == "Income":
-                    for row in section.get("Rows", {}).get("Row", []):
-                        if row.get("type") == "Data":
-                            account = row["ColData"][0].get("value")
-                            amount_str = row["ColData"][1].get("value")
-                            amount = float(amount_str) if amount_str else 0.0
-                            income.append({"account": account, "amount": amount})
-                            summary["totalIncome"] += amount
-                elif header_value == "Expenses":
-                    for row in section.get("Rows", {}).get("Row", []):
-                        if row.get("type") == "Data":
-                            account = row["ColData"][0].get("value")
-                            amount_str = row["ColData"][1].get("value")
-                            amount = float(amount_str) if amount_str else 0.0
-                            expenses.append({"account": account, "amount": amount})
-                            summary["totalExpenses"] += amount
-            for total_section in data["Rows"]["Row"]:
-                summary_col = total_section.get("Summary", {}).get("ColData", [{}])[0].get("value")
-                if summary_col == "Net Income":
-                    net_str = total_section["Summary"]["ColData"][1].get("value")
-                    summary["netProfit"] = float(net_str) if net_str else 0.0
+        if "Rows" not in data or "Row" not in data["Rows"]:
+            logger.warning("Empty or missing report data from QBO")
             return {"income": income, "expenses": expenses, "summary": summary}
-            # Inside the loop or after parsing
+        
+        for section in data["Rows"]["Row"]:
+            header_col_data = section.get("Header", {}).get("ColData", [])
+            if len(header_col_data) > 0:
+                header_value = header_col_data[0].get("value")
+                if header_value == "Income":
+                    section_rows = section.get("Rows", {}).get("Row", [])
+                    for row in section_rows:
+                        if row.get("type") == "Data":
+                            row_col_data = row.get("ColData", [])
+                            if len(row_col_data) >= 2:
+                                account = row_col_data[0].get("value", "Unknown")
+                                amount_str = row_col_data[1].get("value", "").replace(",", "")
+                                try:
+                                    amount = float(amount_str) if amount_str else 0.0
+                                except ValueError:
+                                    amount = 0.0
+                                    logger.warning(f"Invalid amount '{amount_str}' in income row")
+                                income.append({"account": account, "amount": amount})
+                                summary["totalIncome"] += amount
+                elif header_value == "Expenses":
+                    section_rows = section.get("Rows", {}).get("Row", [])
+                    for row in section_rows:
+                        if row.get("type") == "Data":
+                            row_col_data = row.get("ColData", [])
+                            if len(row_col_data) >= 2:
+                                account = row_col_data[0].get("value", "Unknown")
+                                amount_str = row_col_data[1].get("value", "").replace(",", "")
+                                try:
+                                    amount = float(amount_str) if amount_str else 0.0
+                                except ValueError:
+                                    amount = 0.0
+                                    logger.warning(f"Invalid amount '{amount_str}' in expenses row")
+                                expenses.append({"account": account, "amount": amount})
+                                summary["totalExpenses"] += amount
+        
         for total_section in data["Rows"]["Row"]:
-            if total_section.get("Summary", {}).get("ColData", [{}])[0].get("value") == "Net Income":
-                col_data = total_section.get("Summary", {}).get("ColData", [])
-                if len(col_data) > 1 and "value" in col_data[1]:
-                    summary["netProfit"] = float(col_data[1]["value"])
+            summary_col_data = total_section.get("Summary", {}).get("ColData", [])
+            if len(summary_col_data) > 0 and summary_col_data[0].get("value") == "Net Income":
+                if len(summary_col_data) > 1 and "value" in summary_col_data[1]:
+                    net_str = summary_col_data[1].get("value", "").replace(",", "")
+                    try:
+                        summary["netProfit"] = float(net_str) if net_str else 0.0
+                    except ValueError:
+                        summary["netProfit"] = 0.0
+                        logger.warning(f"Invalid net profit value '{net_str}'")
                 else:
                     summary["netProfit"] = 0.0
+                    logger.warning("Missing or incomplete Net Income summary")
+        
+        return {"income": income, "expenses": expenses, "summary": summary}
+    
     except httpx.HTTPStatusError as e:
         error_detail = e.response.json() if e.response.content else {"error": str(e)}
         logger.error(f"QBO API error: {e.response.status_code} - {error_detail}")
@@ -145,10 +167,16 @@ async def get_sales_summary(
         total_orders = 0
         if "Rows" in data and "Row" in data["Rows"]:
             for row in data["Rows"]["Row"]:
-                if row.get("type") == "Data" and row["ColData"][0].get("value") == "Invoice":
-                    total_orders += 1
-                    amount_str = row["ColData"][-1].get("value")
-                    total_sales += float(amount_str) if amount_str else 0.0
+                if row.get("type") == "Data":
+                    row_col_data = row.get("ColData", [])
+                    if len(row_col_data) > 0 and row_col_data[0].get("value") == "Invoice":
+                        total_orders += 1
+                        if len(row_col_data) >= len(row_col_data):  # Adjust index based on actual structure
+                            amount_str = row_col_data[-1].get("value", "").replace(",", "")
+                            try:
+                                total_sales += float(amount_str) if amount_str else 0.0
+                            except ValueError:
+                                logger.warning(f"Invalid amount '{amount_str}' in sales row")
         return {"total": total_sales, "monthly": [{"month": "Current", "sales": total_sales}]}
     
     except httpx.HTTPStatusError as e:
@@ -161,4 +189,61 @@ async def get_sales_summary(
     finally:
         await client.aclose()
 
-# Add similar logic for /sales and /customers if needed
+@router.get("/customers")
+async def get_customers_report(
+    current_user: User = Depends(get_current_user)
+):
+    client = await get_qbo_client(current_user)
+    try:
+        query = "SELECT * FROM Customer MAXRESULTS 1000"
+        resp = await client.get("/query", params={"query": query, "minorversion": "75"})
+        resp.raise_for_status()
+        customers = resp.json().get("QueryResponse", {}).get("Customer", [])
+        return customers  # List of customer dicts
+    except httpx.HTTPStatusError as e:
+        error_detail = e.response.json() if e.response.content else {"error": str(e)}
+        logger.error(f"QBO API error: {e.response.status_code} - {error_detail}")
+        raise HTTPException(500, "QBO customers access failed - check permissions")
+    except Exception as e:
+        logger.error(f"Unexpected customers report error: {str(e)}", exc_info=True)
+        raise HTTPException(500, str(e))
+    finally:
+        await client.aclose()
+
+@router.get("/sales")
+async def get_sales_report(
+    period: str = Query("monthly"),
+    current_user: User = Depends(get_current_user)
+):
+    client = await get_qbo_client(current_user)
+    try:
+        start_date, end_date = calculate_dates(period)
+        query = f"SELECT * FROM Invoice WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+        resp = await client.get("/query", params={"query": query, "minorversion": "75"})
+        resp.raise_for_status()
+        invoices = resp.json().get("QueryResponse", {}).get("Invoice", [])
+        
+        total_sales = sum(float(inv.get("TotalAmt", 0)) for inv in invoices)
+        total_orders = len(invoices)
+        average_order = total_sales / total_orders if total_orders > 0 else 0
+        top_customer = max(invoices, key=lambda inv: float(inv.get("TotalAmt", 0))).get("CustomerRef", {}).get("name", "N/A") if invoices else "N/A"
+        
+        # Simple monthly aggregation (expand for true monthly breakdown)
+        monthly = [{"month": f"{start_date} to {end_date}", "sales": total_sales, "orders": total_orders, "averageOrder": average_order}]
+        
+        summary = {
+            "totalSales": total_sales,
+            "totalOrders": total_orders,
+            "averageOrder": average_order,
+            "topCustomer": top_customer
+        }
+        return {"summary": summary, "monthly": monthly}
+    except httpx.HTTPStatusError as e:
+        error_detail = e.response.json() if e.response.content else {"error": str(e)}
+        logger.error(f"QBO API error: {e.response.status_code} - {error_detail}")
+        raise HTTPException(500, "QBO sales access failed - check permissions")
+    except Exception as e:
+        logger.error(f"Unexpected sales report error: {str(e)}", exc_info=True)
+        raise HTTPException(500, str(e))
+    finally:
+        await client.aclose()
