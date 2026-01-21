@@ -1875,5 +1875,5 @@ var app = (() => {
   window.downloadJobResults = downloadJobResults;
   window.startQBOAuth = startQBOAuth;
   window.handleCellEdit = handleCellEdit;
-  console.log("QBO Solutions Superapp initialized");
+  console.log("Quickbooks Lite initialized");
 })();
