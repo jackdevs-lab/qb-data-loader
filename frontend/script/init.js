@@ -1,4 +1,3 @@
-
 import { APP_STATE } from './state.js';
 import { loadSection } from './navigation.js';
 import { uploadForPreview, proceedToPreview, backToMapping, cancelPreview, startDryRun, startRealImport, updateDryRunButton } from './import.js'; // updateDryRunButton called indirectly
@@ -7,6 +6,8 @@ import { saveProduct, editProduct, deleteProduct } from './loaders/products.js';
 import { exportReport, printReport } from './loaders/reports.js';
 import { refreshJobs, viewJobDetails, downloadJobResults, startQBOAuth } from './loaders/jobs.js';
 import { handleCellEdit } from './helpers.js';
+import { updateUIForAuthState } from './navigation.js';
+import { loadDashboard } from './loaders/dashboard.js';
 
 // Clerk initialization
 window.addEventListener('load', async () => {
@@ -16,6 +17,10 @@ window.addEventListener('load', async () => {
   }
 
   await Clerk.load();
+  updateUIForAuthState();
+
+  loadDashboard();
+
 
   // Wait until the navigation module (which defines updateUIForAuthState) is ready
   // Small delay is usually enough in practice – or use a better signal (see alternative below)
@@ -77,4 +82,4 @@ window.downloadJobResults = downloadJobResults;
 window.startQBOAuth = startQBOAuth;
 window.handleCellEdit = handleCellEdit;
 
-console.log('QBO Solutions Superapp initialized');
+console.log('Quickbooks Lite initialized');
