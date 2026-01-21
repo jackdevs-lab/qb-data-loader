@@ -2170,5 +2170,5 @@ document.addEventListener('click', (e) => {
 
 // Initialize the app
 window.addEventListener('DOMContentLoaded', () => {
-  console.log('QBO Solutions Superapp initialized');
+  console.log('Quickbooks Lite initialized');
 });
