@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,26 +8,33 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script
-    async
-    crossorigin="anonymous"
+  <script async crossorigin="anonymous"
     data-clerk-publishable-key="pk_test_d29ya2FibGUta2l0LTQ1LmNsZXJrLmFjY291bnRzLmRldiQ"
     src="https://workable-kit-45.clerk.accounts.dev/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"
-    type="text/javascript"
-  ></script>
+    type="text/javascript"></script>
   <style>
     .sidebar-link.active {
       background-color: #eff6ff;
       color: #1d4ed8;
       border-left: 4px solid #1d4ed8;
     }
+
     .fade-in {
       animation: fadeIn 0.3s ease-in;
     }
+
     @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
+
     .spinner {
       border: 3px solid #f3f3f3;
       border-top: 3px solid #3b82f6;
@@ -35,10 +43,17 @@
       height: 40px;
       animation: spin 1s linear infinite;
     }
+
     @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
     }
+
     .toast {
       position: fixed;
       top: 20px;
@@ -48,16 +63,18 @@
       transform: translateX(100%);
       transition: all 0.3s ease;
     }
+
     .toast.show {
       opacity: 1;
       transform: translateX(0);
     }
   </style>
 </head>
+
 <body class="bg-gray-50 min-h-screen">
   <!-- Toast Notification Container -->
   <div id="toast-container"></div>
-  
+
   <!-- Public Landing Page (shown when not authenticated) -->
   <div id="landing-page" class="hidden">
     <!-- Hero Section -->
@@ -65,12 +82,15 @@
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div class="text-center">
           <h1 class="text-5xl font-bold mb-6">Corporate QuickBooks Solutions Superapp</h1>
-          <p class="text-xl mb-10 max-w-3xl mx-auto">Your All-in-One QuickBooks Management Platform for Seamless Data Import, Reporting, and Customer Management</p>
+          <p class="text-xl mb-10 max-w-3xl mx-auto">Your All-in-One QuickBooks Management Platform for Seamless Data
+            Import, Reporting, and Customer Management</p>
           <div class="flex justify-center space-x-4">
-            <button id="landing-signin-btn" class="px-8 py-3 bg-white text-blue-600 font-semibold rounded-lg hover:bg-gray-100 transition-colors">
+            <button id="landing-signin-btn"
+              class="px-8 py-3 bg-white text-blue-600 font-semibold rounded-lg hover:bg-gray-100 transition-colors">
               Sign In
             </button>
-            <button id="landing-signup-btn" class="px-8 py-3 bg-blue-800 text-white font-semibold rounded-lg hover:bg-blue-900 transition-colors">
+            <button id="landing-signup-btn"
+              class="px-8 py-3 bg-blue-800 text-white font-semibold rounded-lg hover:bg-blue-900 transition-colors">
               Sign Up Free
             </button>
           </div>
@@ -88,21 +108,24 @@
               <i class="fas fa-file-import"></i>
             </div>
             <h3 class="text-xl font-bold mb-3">Bulk Data Import</h3>
-            <p class="text-gray-600">Import customers, products, and transactions from CSV files with intelligent field mapping and validation.</p>
+            <p class="text-gray-600">Import customers, products, and transactions from CSV files with intelligent field
+              mapping and validation.</p>
           </div>
           <div class="bg-white p-8 rounded-xl shadow-lg">
             <div class="text-blue-600 text-4xl mb-4">
               <i class="fas fa-chart-line"></i>
             </div>
             <h3 class="text-xl font-bold mb-3">Advanced Reporting</h3>
-            <p class="text-gray-600">Generate detailed reports, analyze sales trends, and track business performance with interactive charts.</p>
+            <p class="text-gray-600">Generate detailed reports, analyze sales trends, and track business performance
+              with interactive charts.</p>
           </div>
           <div class="bg-white p-8 rounded-xl shadow-lg">
             <div class="text-blue-600 text-4xl mb-4">
               <i class="fas fa-users"></i>
             </div>
             <h3 class="text-xl font-bold mb-3">Customer Management</h3>
-            <p class="text-gray-600">Manage your QuickBooks customers directly from the app with full CRUD operations and real-time sync.</p>
+            <p class="text-gray-600">Manage your QuickBooks customers directly from the app with full CRUD operations
+              and real-time sync.</p>
           </div>
         </div>
       </div>
@@ -112,8 +135,10 @@
     <section class="bg-gradient-to-r from-green-500 to-emerald-600 text-white py-16">
       <div class="max-w-4xl mx-auto text-center px-4">
         <h2 class="text-3xl font-bold mb-6">Streamline Your QuickBooks Workflow Today</h2>
-        <p class="text-xl mb-8">Join thousands of businesses using our platform to simplify their QuickBooks operations.</p>
-        <button id="landing-get-started" class="px-10 py-4 bg-white text-green-700 font-bold text-lg rounded-lg hover:bg-gray-100 transition-colors">
+        <p class="text-xl mb-8">Join thousands of businesses using our platform to simplify their QuickBooks operations.
+        </p>
+        <button id="landing-get-started"
+          class="px-10 py-4 bg-white text-green-700 font-bold text-lg rounded-lg hover:bg-gray-100 transition-colors">
           Get Started For Free
         </button>
       </div>
@@ -143,10 +168,20 @@
 
           <!-- Top Navigation Links -->
           <nav class="hidden md:flex items-center space-x-8">
-            <a href="#" data-section="dashboard" class="nav-link text-gray-700 hover:text-blue-600 font-medium">Dashboard</a>
-            <a href="#" data-section="customers" class="nav-link text-gray-700 hover:text-blue-600 font-medium">Customers</a>
-            <a href="#" data-section="products" class="nav-link text-gray-700 hover:text-blue-600 font-medium">Products</a>
-            <a href="#" data-section="reports" class="nav-link text-gray-700 hover:text-blue-600 font-medium">Reports</a>
+            <a href="#" data-section="dashboard"
+              class="nav-link text-gray-700 hover:text-blue-600 font-medium">Dashboard</a>
+            <a href="#" data-section="customers"
+              class="nav-link text-gray-700 hover:text-blue-600 font-medium">Customers</a>
+            <a href="#" data-section="products"
+              class="nav-link text-gray-700 hover:text-blue-600 font-medium">Products</a>
+            <a href="#" data-section="invoices"
+              class="nav-link text-gray-700 hover:text-blue-600 font-medium">Invoices</a>
+            <a href="#" data-section="sales-receipts"
+              class="nav-link text-gray-700 hover:text-blue-600 font-medium">Sales Receipts</a>
+            <a href="#" data-section="expenses"
+              class="nav-link text-gray-700 hover:text-blue-600 font-medium">Expenses</a>
+            <a href="#" data-section="reports"
+              class="nav-link text-gray-700 hover:text-blue-600 font-medium">Reports</a>
             <a href="#" data-section="jobs" class="nav-link text-gray-700 hover:text-blue-600 font-medium">Jobs</a>
           </nav>
 
@@ -154,7 +189,8 @@
           <div class="flex items-center space-x-4">
             <div class="hidden md:flex items-center space-x-4">
               <span id="qbo-status" class="text-sm text-gray-500">Checking QuickBooks...</span>
-              <button id="connect-qbo-btn" onclick="startQBOAuth()" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+              <button id="connect-qbo-btn" onclick="startQBOAuth()"
+                class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">
                 Connect to QuickBooks
               </button>
             </div>
@@ -166,18 +202,30 @@
           </div>
         </div>
       </div>
-      
+
       <!-- Mobile Menu -->
       <div id="mobile-menu" class="md:hidden bg-white border-t hidden">
         <div class="px-4 py-3 space-y-3">
-          <a href="#" data-section="dashboard" class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Dashboard</a>
-          <a href="#" data-section="customers" class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Customers</a>
-          <a href="#" data-section="products" class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Products</a>
-          <a href="#" data-section="reports" class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Reports</a>
-          <a href="#" data-section="jobs" class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Jobs</a>
+          <a href="#" data-section="dashboard"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Dashboard</a>
+          <a href="#" data-section="customers"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Customers</a>
+          <a href="#" data-section="products"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Products</a>
+          <a href="#" data-section="invoices"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Invoices</a>
+          <a href="#" data-section="sales-receipts"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Sales Receipts</a>
+          <a href="#" data-section="expenses"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Expenses</a>
+          <a href="#" data-section="reports"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Reports</a>
+          <a href="#" data-section="jobs"
+            class="block nav-link text-gray-700 hover:text-blue-600 font-medium py-2">Jobs</a>
           <div class="pt-3 border-t">
             <span id="qbo-status-mobile" class="text-sm text-gray-500 block mb-2">Checking QuickBooks...</span>
-            <button onclick="startQBOAuth()" class="w-full px-3 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+            <button onclick="startQBOAuth()"
+              class="w-full px-3 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
               Connect to QuickBooks
             </button>
           </div>
@@ -207,10 +255,12 @@
   </div>
 
   <!-- Modal Container -->
-  <div id="modal-container" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+  <div id="modal-container"
+    class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
     <!-- Modal content will be dynamically inserted here -->
   </div>
 
   <script type="module" src="/static/script/init.js"></script>
 </body>
+
 </html>
