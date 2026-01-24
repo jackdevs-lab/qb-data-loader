@@ -6,7 +6,7 @@ import * as loaders from './loaders/index.js';
 export async function loadSection(section, subSection = null) {
   APP_STATE.currentSection = section;
   APP_STATE.currentSubSection = subSection;
- 
+
   // Update active navigation
   document.querySelectorAll('.nav-link').forEach(link => {
     link.classList.remove('text-blue-600', 'font-bold');
@@ -14,15 +14,15 @@ export async function loadSection(section, subSection = null) {
       link.classList.add('text-blue-600', 'font-bold');
     }
   });
- 
+
   // Update sidebar
   updateSidebar(section, subSection);
- 
+
   // Load content
   showLoading();
- 
+
   try {
-    switch(section) {
+    switch (section) {
       case 'dashboard':
         await loaders.loadDashboard();
         break;
@@ -31,6 +31,15 @@ export async function loadSection(section, subSection = null) {
         break;
       case 'products':
         await loaders.loadProductsSection(subSection);
+        break;
+      case 'invoices':
+        await loaders.loadSalesSection(subSection);
+        break;
+      case 'sales-receipts':
+        await loaders.loadSalesSection(subSection);
+        break;
+      case 'expenses':
+        await loaders.loadExpensesSection(subSection);
         break;
       case 'reports':
         await loaders.loadReportsSection(subSection);
@@ -62,8 +71,8 @@ export async function loadSection(section, subSection = null) {
 export function updateSidebar(section, subSection) {
   const sidebarNav = document.getElementById('sidebar-nav');
   let sidebarHTML = '';
- 
-  switch(section) {
+
+  switch (section) {
     case 'dashboard':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Dashboard</h3>
@@ -75,7 +84,7 @@ export function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-     
+
     case 'customers':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Customers</h3>
@@ -90,7 +99,7 @@ export function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-     
+
     case 'products':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Products & Services</h3>
@@ -102,7 +111,31 @@ export function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-     
+
+    case 'sales':
+      sidebarHTML = `
+        <h3 class="font-bold text-gray-700 mb-4">Sales</h3>
+        <a href="#" data-subsection="invoices" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'invoices' || !subSection ? 'active' : ''}">
+          <i class="fas fa-file-invoice mr-3"></i>Invoices
+        </a>
+        <a href="#" data-subsection="sales-receipts" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'sales-receipts' ? 'active' : ''}">
+          <i class="fas fa-receipt mr-3"></i>Sales Receipts
+        </a>
+      `;
+      break;
+
+    case 'expenses':
+      sidebarHTML = `
+        <h3 class="font-bold text-gray-700 mb-4">Expenses</h3>
+        <a href="#" data-subsection="list" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'list' || !subSection ? 'active' : ''}">
+          <i class="fas fa-list mr-3"></i>Expense List
+        </a>
+        <a href="#" data-subsection="create" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'create' ? 'active' : ''}">
+          <i class="fas fa-plus-circle mr-3"></i>Add Expense
+        </a>
+      `;
+      break;
+
     case 'reports':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Reports</h3>
@@ -117,7 +150,7 @@ export function updateSidebar(section, subSection) {
         </a>
       `;
       break;
-     
+
     case 'jobs':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Import Jobs</h3>
@@ -130,9 +163,9 @@ export function updateSidebar(section, subSection) {
       `;
       break;
   }
- 
+
   sidebarNav.innerHTML = sidebarHTML;
- 
+
   // Add event listeners to sidebar links
   sidebarNav.querySelectorAll('a').forEach(link => {
     link.addEventListener('click', (e) => {
@@ -145,30 +178,30 @@ export function updateSidebar(section, subSection) {
 
 export function updateUIForAuthState() {
   const isAuthenticated = !!Clerk.user;
- 
+
   if (isAuthenticated) {
     // User is logged in - show app
     document.getElementById('landing-page').classList.add('hidden');
     document.getElementById('app-container').classList.remove('hidden');
     document.getElementById('sidebar').classList.remove('hidden');
-   
+
     // Initialize Clerk user button
     const mountDiv = document.getElementById('clerk-mount');
     mountDiv.innerHTML = '';
     Clerk.mountUserButton(mountDiv);
-   
+
     // Load initial section
     loadSection('dashboard');
-   
+
     // Update QBO status and load jobs
     updateQBOStatus();
     setInterval(updateQBOStatus, 30000);
-   
+
   } else {
     // User is not logged in - show landing page
     document.getElementById('landing-page').classList.remove('hidden');
     document.getElementById('app-container').classList.add('hidden');
-   
+
     // Setup landing page buttons
     document.getElementById('landing-signin-btn').onclick = () => Clerk.openSignIn();
     document.getElementById('landing-signup-btn').onclick = () => Clerk.openSignUp();
