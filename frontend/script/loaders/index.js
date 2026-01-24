@@ -3,3 +3,5 @@ export { loadCustomersSection } from './customers.js';
 export { loadProductsSection } from './products.js';
 export { loadReportsSection } from './reports.js';
 export { loadJobsSection } from './jobs.js';
+export { loadSalesSection } from './sales.js';
+export { loadExpensesSection } from './expenses.js';    
