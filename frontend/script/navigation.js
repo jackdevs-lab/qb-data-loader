@@ -7,7 +7,7 @@ export async function loadSection(section, subSection = null) {
   APP_STATE.currentSection = section;
   APP_STATE.currentSubSection = subSection;
 
-  // Update active navigation
+  // Update active top nav
   document.querySelectorAll('.nav-link').forEach(link => {
     link.classList.remove('text-blue-600', 'font-bold');
     if (link.dataset.section === section) {
@@ -32,14 +32,17 @@ export async function loadSection(section, subSection = null) {
       case 'products':
         await loaders.loadProductsSection(subSection);
         break;
+      case 'sales':
+        await loaders.loadSalesSection(subSection || 'invoices-list');
+        break;
       case 'invoices':
-        await loaders.loadSalesSection(subSection);
+        await loaders.loadSalesSection('invoices-list');
         break;
       case 'sales-receipts':
-        await loaders.loadSalesSection(subSection);
+        await loaders.loadSalesSection('receipts-list');
         break;
       case 'expenses':
-        await loaders.loadExpensesSection(subSection);
+        await loaders.loadExpensesSection(subSection || 'expenses-list');
         break;
       case 'reports':
         await loaders.loadReportsSection(subSection);
@@ -55,9 +58,7 @@ export async function loadSection(section, subSection = null) {
     document.getElementById('content-container').innerHTML = `
       <div class="bg-red-50 border-l-4 border-red-500 p-6 rounded">
         <div class="flex items-center">
-          <div class="text-red-500 text-2xl mr-3">
-            <i class="fas fa-exclamation-triangle"></i>
-          </div>
+          <div class="text-red-500 text-2xl mr-3"><i class="fas fa-exclamation-triangle"></i></div>
           <div>
             <h3 class="text-lg font-medium text-red-800">Error Loading Content</h3>
             <p class="text-red-700 mt-1">${error.message || 'Please try again later.'}</p>
@@ -115,10 +116,10 @@ export function updateSidebar(section, subSection) {
     case 'sales':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Sales</h3>
-        <a href="#" data-subsection="invoices" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'invoices' || !subSection ? 'active' : ''}">
+        <a href="#" data-subsection="invoices-list" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'invoices-list' ? 'active' : ''}">
           <i class="fas fa-file-invoice mr-3"></i>Invoices
         </a>
-        <a href="#" data-subsection="sales-receipts" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'sales-receipts' ? 'active' : ''}">
+        <a href="#" data-subsection="receipts-list" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'receipts-list' ? 'active' : ''}">
           <i class="fas fa-receipt mr-3"></i>Sales Receipts
         </a>
       `;
@@ -127,15 +128,20 @@ export function updateSidebar(section, subSection) {
     case 'expenses':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Expenses</h3>
-        <a href="#" data-subsection="list" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'list' || !subSection ? 'active' : ''}">
-          <i class="fas fa-list mr-3"></i>Expense List
+        <a href="#" data-subsection="expenses-list" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'expenses-list' ? 'active' : ''}">
+          <i class="fas fa-list mr-3"></i>Expenses
         </a>
-        <a href="#" data-subsection="create" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'create' ? 'active' : ''}">
-          <i class="fas fa-plus-circle mr-3"></i>Add Expense
+        <a href="#" data-subsection="expenses-create" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'expenses-create' ? 'active' : ''}">
+          <i class="fas fa-plus-circle mr-3"></i>Record Expense
+        </a>
+        <a href="#" data-subsection="bills-list" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'bills-list' ? 'active' : ''}">
+          <i class="fas fa-file-invoice-dollar mr-3"></i>Bills
+        </a>
+        <a href="#" data-subsection="bills-create" class="block sidebar-link py-3 px-4 rounded hover:bg-blue-50 ${subSection === 'bills-create' ? 'active' : ''}">
+          <i class="fas fa-plus-circle mr-3"></i>Create Bill
         </a>
       `;
       break;
-
     case 'reports':
       sidebarHTML = `
         <h3 class="font-bold text-gray-700 mb-4">Reports</h3>
