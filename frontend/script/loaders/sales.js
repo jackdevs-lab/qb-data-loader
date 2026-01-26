@@ -121,9 +121,35 @@ async function renderReceiptsList(content) {
     </div>
   `;
 
-  // Fetch and render logic similar to invoices...
-  // Add your fetch code here if needed
+  try {
+    const resp = await authenticatedFetch('/api/sales_receipts?limit=10');
+    if (resp.status === 401) throw new Error('Unauthorized – please reconnect to QuickBooks');
+    if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
 
+    const receipts = await resp.json();
+    console.log('DEBUG: Receipts data received:', receipts);
+    const tbody = document.getElementById('receipts-tbody');
+
+    if (!receipts || receipts.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-gray-500">No sales receipts found</td></tr>';
+    } else {
+      tbody.innerHTML = receipts.map(rec => `
+        <tr class="hover:bg-gray-50 transition-colors">
+          <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${rec.Id}</td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${rec.CustomerRef?.name || '—'}</td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">$${Number(rec.TotalAmt || 0).toFixed(2)}</td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${rec.TxnDate || '—'}</td>
+        </tr>
+      `).join('');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+    document.getElementById('receipts-tbody').innerHTML = `
+      <tr><td colspan="4" class="px-6 py-10 text-center text-red-600">${err.message}</td></tr>
+    `;
+  }
+
+  // Event listener for create button
   setTimeout(() => {
     const btn = document.getElementById('btn-create-receipt');
     if (btn) btn.addEventListener('click', () => loadSalesSection('receipts-create'));
