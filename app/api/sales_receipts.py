@@ -9,12 +9,16 @@ router = APIRouter(prefix="/api/sales_receipts", tags=["sales_receipts"])
 async def list_sales_receipts(limit: int = Query(10), current_user: User = Depends(get_current_user)):
     client = await get_qbo_client(current_user)
     try:
-        query = f"SELECT * FROM SalesReceipt ORDERBY MetaData.CreateTime DESC MAXRESULTS {limit}"
+        # Fixed: space in "ORDER BY"
+        query = f"SELECT * FROM SalesReceipt ORDER BY MetaData.CreateTime DESC MAXRESULTS {limit}"
+        print(f"DEBUG: Running sales receipt query: {query}")
         resp = await client.get("/query", params={"query": query, "minorversion": "75"})
         resp.raise_for_status()
-        return resp.json().get("QueryResponse", {}).get("SalesReceipt", [])
+        data = resp.json()
+        print(f"DEBUG: Sales receipt response: {data}")
+        return data.get("QueryResponse", {}).get("SalesReceipt", [])
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         await client.aclose()
 
@@ -26,6 +30,6 @@ async def create_sales_receipt(payload: dict, current_user: User = Depends(get_c
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         await client.aclose()
