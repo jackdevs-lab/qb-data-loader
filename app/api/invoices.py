@@ -9,12 +9,16 @@ router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 async def list_invoices(limit: int = Query(10), current_user: User = Depends(get_current_user)):
     client = await get_qbo_client(current_user)
     try:
-        query = f"SELECT * FROM Invoice ORDERBY MetaData.CreateTime DESC MAXRESULTS {limit}"
+        # Fixed: space in "ORDER BY"
+        query = f"SELECT * FROM Invoice ORDER BY MetaData.CreateTime DESC MAXRESULTS {limit}"
+        print(f"DEBUG: Running invoice query: {query}")
         resp = await client.get("/query", params={"query": query, "minorversion": "75"})
         resp.raise_for_status()
-        return resp.json().get("QueryResponse", {}).get("Invoice", [])
+        data = resp.json()
+        print(f"DEBUG: Invoice response: {data}")
+        return data.get("QueryResponse", {}).get("Invoice", [])
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         await client.aclose()
 
@@ -26,6 +30,6 @@ async def create_invoice(payload: dict, current_user: User = Depends(get_current
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         await client.aclose()
