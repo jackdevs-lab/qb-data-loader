@@ -1,18 +1,21 @@
 import { APP_STATE } from '../state.js';
 import { fetchWithAuth } from '../helpers.js';
 import { showToast } from '../utils.js';
-
+let editingCustomerId = null;     // ← tracks if we're editing
+let editingCustomerSyncToken = null;
 export async function loadCustomersSection(subSection) {
   try {
     let html = '';
-   
+
     if (subSection === 'list' || !subSection) {
-      // Load customer list
-      const res = await fetchWithAuth('/api/customers');
-      if (res.ok) {
-        APP_STATE.customers = await res.json();
+      // Load customer list if not already loaded
+      if (!APP_STATE.customers || APP_STATE.customers.length === 0) {
+        const res = await fetchWithAuth('/api/customers');
+        if (res.ok) {
+          APP_STATE.customers = await res.json();
+        }
       }
-     
+
       html = `
         <div class="fade-in">
           <div class="flex justify-between items-center mb-8">
@@ -117,73 +120,113 @@ export async function loadCustomersSection(subSection) {
           </div>
         </div>
       `;
-    } else if (subSection === 'create') {
-      // Create customer form
+    } else if (subSection === 'create' || subSection === 'edit') {
+      const isEditMode = subSection === 'edit';
+      let customer = null;
+
+      if (isEditMode) {
+        const id = new URLSearchParams(window.location.search).get('id') || editingCustomerId;
+        if (!id) {
+          showToast('No customer ID provided for editing', 'error');
+          loadSection('customers', 'list');
+          return;
+        }
+        try {
+          const res = await fetchWithAuth(`/api/customers/${id}`);
+          if (!res.ok) throw new Error('Failed to fetch customer');
+          customer = await res.json();
+          editingCustomerId = customer.Id;
+          editingCustomerSyncToken = customer.SyncToken;
+        } catch (err) {
+          showToast('Error loading customer: ' + err.message, 'error');
+          loadSection('customers', 'list');
+          return;
+        }
+      }
+
+      const title = isEditMode ? 'Edit Customer' : 'Add New Customer';
+      const buttonText = isEditMode ? 'Update Customer' : 'Save Customer';
+
       html = `
-        <div class="fade-in max-w-4xl">
-          <div class="flex items-center mb-8">
-            <button onclick="loadSection('customers', 'list')" class="text-blue-600 hover:text-blue-800 mr-4">
-              <i class="fas fa-arrow-left"></i>
-            </button>
-            <h2 class="text-2xl font-bold text-gray-800">Add New Customer</h2>
-          </div>
-         
-          <div class="bg-white rounded-xl shadow p-8">
-            <form id="customer-form" onsubmit="saveCustomer(event)">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Display Name *</label>
-                  <input type="text" name="DisplayName" required class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Company Name</label>
-                  <input type="text" name="CompanyName" class="w-full px-4 py-2 border rounded-lg">
-                </div>
-               
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Primary Email</label>
-                  <input type="email" name="PrimaryEmailAddr.Address" class="w-full px-4 py-2 border rounded-lg">
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Primary Phone</label>
-                  <input type="text" name="PrimaryPhone.FreeFormNumber" class="w-full px-4 py-2 border rounded-lg">
-                </div>
-               
-                <div class="md:col-span-2">
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Billing Address</label>
-                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <input type="text" name="BillAddr.Line1" placeholder="Street Address" class="px-4 py-2 border rounded-lg">
-                    <input type="text" name="BillAddr.City" placeholder="City" class="px-4 py-2 border rounded-lg">
-                    <input type="text" name="BillAddr.PostalCode" placeholder="ZIP Code" class="px-4 py-2 border rounded-lg">
-                  </div>
-                </div>
-               
-                <div class="md:col-span-2">
-                  <div class="flex items-center space-x-6">
-                    <label class="flex items-center">
-                      <input type="checkbox" name="Taxable" class="mr-2">
-                      <span class="text-sm text-gray-700">Taxable</span>
-                    </label>
-                    <label class="flex items-center">
-                      <input type="checkbox" name="Active" checked class="mr-2">
-                      <span class="text-sm text-gray-700">Active</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-             
-              <div class="flex justify-end space-x-4">
-                <button type="button" onclick="loadSection('customers', 'list')" class="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50">
-                  Cancel
-                </button>
-                <button type="submit" class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                  Save Customer
-                </button>
-              </div>
-            </form>
-          </div>
+      <div class="fade-in max-w-4xl">
+        <div class="flex items-center mb-8">
+          <button onclick="loadSection('customers', 'list')" class="text-blue-600 hover:text-blue-800 mr-4">
+            <i class="fas fa-arrow-left"></i>
+          </button>
+          <h2 class="text-2xl font-bold text-gray-800">${title}</h2>
         </div>
-      `;
+        
+        <div class="bg-white rounded-xl shadow p-8">
+          <form id="customer-form" onsubmit="saveCustomer(event)">
+            <!-- Hidden fields for edit mode -->
+            ${isEditMode ? `
+              <input type="hidden" name="Id" value="${customer.Id}">
+              <input type="hidden" name="SyncToken" value="${customer.SyncToken}">
+            ` : ''}
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Display Name *</label>
+                <input type="text" name="DisplayName" required class="w-full px-4 py-2 border rounded-lg" 
+                       value="${customer?.DisplayName || ''}">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Company Name</label>
+                <input type="text" name="CompanyName" class="w-full px-4 py-2 border rounded-lg" 
+                       value="${customer?.CompanyName || ''}">
+              </div>
+              
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Primary Email</label>
+                <input type="email" name="PrimaryEmailAddr.Address" class="w-full px-4 py-2 border rounded-lg" 
+                       value="${customer?.PrimaryEmailAddr?.Address || ''}">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Primary Phone</label>
+                <input type="text" name="PrimaryPhone.FreeFormNumber" class="w-full px-4 py-2 border rounded-lg" 
+                       value="${customer?.PrimaryPhone?.FreeFormNumber || ''}">
+              </div>
+
+              <!-- Add more fields as needed (Billing Address, etc.) -->
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Billing Address</label>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <input type="text" name="BillAddr.Line1" placeholder="Street Address" class="px-4 py-2 border rounded-lg" 
+                         value="${customer?.BillAddr?.Line1 || ''}">
+                  <input type="text" name="BillAddr.City" placeholder="City" class="px-4 py-2 border rounded-lg" 
+                         value="${customer?.BillAddr?.City || ''}">
+                  <input type="text" name="BillAddr.PostalCode" placeholder="ZIP Code" class="px-4 py-2 border rounded-lg" 
+                         value="${customer?.BillAddr?.PostalCode || ''}">
+                </div>
+              </div>
+
+              <div class="md:col-span-2">
+                <div class="flex items-center space-x-6">
+                  <label class="flex items-center">
+                    <input type="checkbox" name="Taxable" class="mr-2" ${customer?.Taxable ? 'checked' : ''}>
+                    <span class="text-sm text-gray-700">Taxable</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input type="checkbox" name="Active" class="mr-2" ${customer?.Active !== false ? 'checked' : ''}>
+                    <span class="text-sm text-gray-700">Active</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            
+            <div class="flex justify-end space-x-4">
+              <button type="button" onclick="loadSection('customers', 'list')" class="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50">
+                Cancel
+              </button>
+              <button type="submit" class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                ${buttonText}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
     } else if (subSection === 'import') {
       // Load the existing import functionality
       html = `
@@ -286,9 +329,9 @@ export async function loadCustomersSection(subSection) {
         </div>
       `;
     }
-   
+
     document.getElementById('content-container').innerHTML = html;
-   
+
     // If we're in import mode, we need to reinitialize the import functionality
     if (subSection === 'import') {
       // Reset import state
@@ -320,39 +363,50 @@ export async function loadCustomersSection(subSection) {
     `;
   }
 }
-
+export async function editCustomer(id) {
+  editingCustomerId = id;
+  loadSection('customers', 'edit');   // or use URL param: loadSection('customers', 'create?id=' + id)
+}
 export async function saveCustomer(event) {
   event.preventDefault();
   const form = event.target;
   const formData = new FormData(form);
   const data = Object.fromEntries(formData.entries());
- 
-  // Convert checkbox values
+
+  // Convert checkboxes
   data.Taxable = formData.has('Taxable');
   data.Active = formData.has('Active');
- 
+
+  const isUpdate = !!data.Id;
+
   try {
-    const res = await fetchWithAuth('/api/customers', {
-      method: 'POST',
+    const url = isUpdate ? `/api/customers/${data.Id}` : '/api/customers';
+    const method = isUpdate ? 'PUT' : 'POST';
+
+    // For updates, remove Id/SyncToken from main payload – backend handles it
+    if (isUpdate) {
+      delete data.Id;
+      delete data.SyncToken;
+    }
+
+    const res = await fetchWithAuth(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-   
+
     if (res.ok) {
-      showToast('Customer saved successfully!', 'success');
+      showToast(isUpdate ? 'Customer updated successfully!' : 'Customer created successfully!', 'success');
+      editingCustomerId = null;
+      editingCustomerSyncToken = null;
       loadSection('customers', 'list');
     } else {
-      throw new Error('Failed to save customer');
+      const err = await res.text();
+      throw new Error(err || 'Failed to save customer');
     }
   } catch (error) {
-    showToast('Error saving customer: ' + error.message, 'error');
+    showToast('Error: ' + error.message, 'error');
   }
-}
-
-export async function editCustomer(id) {
-  // In a real app, you would fetch the customer details
-  // and populate a form for editing
-  showToast('Edit functionality would fetch customer details', 'info');
 }
 
 export async function deleteCustomer(id, name) {
@@ -361,7 +415,7 @@ export async function deleteCustomer(id, name) {
       const res = await fetchWithAuth(`/api/customers/${id}`, {
         method: 'DELETE'
       });
-     
+
       if (res.ok) {
         showToast('Customer deleted successfully!', 'success');
         loadSection('customers', 'list');
