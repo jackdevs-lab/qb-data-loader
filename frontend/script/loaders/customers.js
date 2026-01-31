@@ -1,8 +1,104 @@
 import { APP_STATE } from '../state.js';
 import { fetchWithAuth } from '../helpers.js';
 import { showToast } from '../utils.js';
-let editingCustomerId = null;     // ← tracks if we're editing
+
+let editingCustomerId = null;
 let editingCustomerSyncToken = null;
+let currentFilter = 'active';
+let currentSearch = '';
+
+function renderCustomerTable(customers) {
+  if (customers.length === 0) {
+    return `
+      <div class="text-center py-12">
+        <div class="text-gray-400 text-5xl mb-4">
+          <i class="fas fa-users"></i>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">No Customers Found</h3>
+        <p class="text-gray-500 mb-6">Get started by adding your first customer or importing a CSV file.</p>
+        <div class="space-x-4">
+          <button onclick="loadSection('customers', 'create')" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+            Add Customer
+          </button>
+          <button onclick="loadSection('customers', 'import')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+            Import CSV
+          </button>
+        </div>
+      </div>
+    `;
+  } else {
+    return `
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Display Name</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            ${customers.map(customer => `
+              <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <div class="font-medium text-gray-900">${customer.DisplayName || 'Unnamed'}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <div class="text-gray-900">${customer.CompanyName || '—'}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <div class="text-gray-900">${customer.PrimaryEmailAddr?.Address || '—'}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <div class="text-gray-900">${customer.PrimaryPhone?.FreeFormNumber || '—'}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <span class="px-3 py-1 text-xs rounded-full ${customer.Active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}">
+                    ${customer.Active ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                  <button onclick="editCustomer('${customer.Id}')" class="text-blue-600 hover:text-blue-900 mr-4">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button onclick="deleteCustomer('${customer.Id}', '${customer.DisplayName || 'Customer'}')" class="text-red-600 hover:text-red-900">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+}
+
+function updateCustomerTable() {
+  const filtered = APP_STATE.customers.filter(customer => {
+    let matchesFilter = true;
+    if (currentFilter === 'active') {
+      matchesFilter = customer.Active;
+    } else if (currentFilter === 'inactive') {
+      matchesFilter = !customer.Active;
+    }
+    if (!matchesFilter) return false;
+
+    if (currentSearch) {
+      const searchLower = currentSearch.toLowerCase();
+      const displayName = (customer.DisplayName || '').toLowerCase();
+      const companyName = (customer.CompanyName || '').toLowerCase();
+      return displayName.includes(searchLower) || companyName.includes(searchLower);
+    }
+    return true;
+  });
+
+  document.getElementById('customers-table-container').innerHTML = renderCustomerTable(filtered);
+}
+
 export async function loadCustomersSection(subSection) {
   try {
     let html = '';
@@ -15,6 +111,8 @@ export async function loadCustomersSection(subSection) {
           APP_STATE.customers = await res.json();
         }
       }
+
+      const initialCustomers = APP_STATE.customers.filter(c => c.Active);
 
       html = `
         <div class="fade-in">
@@ -42,7 +140,7 @@ export async function loadCustomersSection(subSection) {
               <div class="flex space-x-4">
                 <select id="customer-filter" class="px-4 py-2 border rounded-lg">
                   <option value="all">All Customers</option>
-                  <option value="active">Active Only</option>
+                  <option value="active" selected>Active Only</option>
                   <option value="inactive">Inactive Only</option>
                 </select>
                 <button onclick="exportCustomers()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
@@ -53,73 +151,25 @@ export async function loadCustomersSection(subSection) {
           </div>
          
           <!-- Customers Table -->
-          <div class="bg-white rounded-xl shadow overflow-hidden">
-            ${APP_STATE.customers.length > 0 ? `
-              <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                  <thead class="bg-gray-50">
-                    <tr>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Display Name</th>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody class="bg-white divide-y divide-gray-200">
-                    ${APP_STATE.customers.map(customer => `
-                      <tr class="hover:bg-gray-50">
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <div class="font-medium text-gray-900">${customer.DisplayName || 'Unnamed'}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <div class="text-gray-900">${customer.CompanyName || '—'}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <div class="text-gray-900">${customer.PrimaryEmailAddr?.Address || '—'}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <div class="text-gray-900">${customer.PrimaryPhone?.FreeFormNumber || '—'}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <span class="px-3 py-1 text-xs rounded-full ${customer.Active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}">
-                            ${customer.Active ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button onclick="editCustomer('${customer.Id}')" class="text-blue-600 hover:text-blue-900 mr-4">
-                            <i class="fas fa-edit"></i>
-                          </button>
-                          <button onclick="deleteCustomer('${customer.Id}', '${customer.DisplayName || 'Customer'}')" class="text-red-600 hover:text-red-900">
-                            <i class="fas fa-trash"></i>
-                          </button>
-                        </td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-              </div>
-            ` : `
-              <div class="text-center py-12">
-                <div class="text-gray-400 text-5xl mb-4">
-                  <i class="fas fa-users"></i>
-                </div>
-                <h3 class="text-lg font-medium text-gray-900 mb-2">No Customers Found</h3>
-                <p class="text-gray-500 mb-6">Get started by adding your first customer or importing a CSV file.</p>
-                <div class="space-x-4">
-                  <button onclick="loadSection('customers', 'create')" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
-                    Add Customer
-                  </button>
-                  <button onclick="loadSection('customers', 'import')" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                    Import CSV
-                  </button>
-                </div>
-              </div>
-            `}
+          <div id="customers-table-container" class="bg-white rounded-xl shadow overflow-hidden">
+            ${renderCustomerTable(initialCustomers)}
           </div>
         </div>
       `;
+
+      document.getElementById('content-container').innerHTML = html;
+
+      // Attach event listeners
+      document.getElementById('customer-search').addEventListener('input', (e) => {
+        currentSearch = e.target.value;
+        updateCustomerTable();
+      });
+
+      document.getElementById('customer-filter').addEventListener('change', (e) => {
+        currentFilter = e.target.value;
+        updateCustomerTable();
+      });
+
     } else if (subSection === 'create' || subSection === 'edit') {
       const isEditMode = subSection === 'edit';
       let customer = null;
@@ -330,7 +380,9 @@ export async function loadCustomersSection(subSection) {
       `;
     }
 
-    document.getElementById('content-container').innerHTML = html;
+    if (subSection !== 'list' && subSection) {
+      document.getElementById('content-container').innerHTML = html;
+    }
 
     // If we're in import mode, we need to reinitialize the import functionality
     if (subSection === 'import') {
@@ -363,10 +415,12 @@ export async function loadCustomersSection(subSection) {
     `;
   }
 }
+
 export async function editCustomer(id) {
   editingCustomerId = id;
-  loadSection('customers', 'edit');   // or use URL param: loadSection('customers', 'create?id=' + id)
+  loadSection('customers', 'edit');
 }
+
 export async function saveCustomer(event) {
   event.preventDefault();
   const form = event.target;
@@ -399,6 +453,7 @@ export async function saveCustomer(event) {
       showToast(isUpdate ? 'Customer updated successfully!' : 'Customer created successfully!', 'success');
       editingCustomerId = null;
       editingCustomerSyncToken = null;
+      APP_STATE.customers = []; // Invalidate cache to refetch on next load
       loadSection('customers', 'list');
     } else {
       const err = await res.text();
@@ -418,6 +473,7 @@ export async function deleteCustomer(id, name) {
 
       if (res.ok) {
         showToast('Customer deleted successfully!', 'success');
+        APP_STATE.customers = []; // Invalidate cache to refetch on next load
         loadSection('customers', 'list');
       } else {
         throw new Error('Failed to delete customer');
