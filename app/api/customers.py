@@ -1,8 +1,8 @@
-# app/api/customers.py
 from fastapi import APIRouter, Depends, HTTPException
 from app.core.auth import get_current_user
 from app.models.db import User
 from app.core.qbo import get_qbo_client
+from app.schemas.customer import CustomerCanonical, CustomerUpdate
 import httpx
 import logging
 
@@ -12,17 +12,39 @@ router = APIRouter(prefix="/api/customers", tags=["customers"])
 
 @router.get("")
 async def list_customers(
-    limit: int | None = None,
+    limit: int = 100,
+    offset: int = 1,
+    include_count: bool = True,
     current_user: User = Depends(get_current_user)
 ):
+    """List customers with pagination support"""
     client = await get_qbo_client(current_user)
     try:
-        max_results = limit or 1000
-        query = f"SELECT * FROM Customer WHERE Active IN (true, false) MAXRESULTS {max_results}"
+        # 1. Fetch data
+        query = f"SELECT * FROM Customer WHERE Active IN (true, false) STARTPOSITION {offset} MAXRESULTS {limit}"
         resp = await client.get("/query", params={"query": query, "minorversion": "75"})
         resp.raise_for_status()
         data = resp.json()
-        return data.get("QueryResponse", {}).get("Customer", [])
+        customers = data.get("QueryResponse", {}).get("Customer", [])
+        
+        # 2. Fetch total count if requested
+        total_count = None
+        if include_count:
+            count_query = "SELECT COUNT(*) FROM Customer WHERE Active IN (true, false)"
+            count_resp = await client.get("/query", params={"query": count_query, "minorversion": "75"})
+            if count_resp.is_success:
+                total_count = count_resp.json().get("QueryResponse", {}).get("totalCount")
+
+        return {
+            "customers": customers,
+            "totalCount": total_count if total_count is not None else len(customers),
+            "limit": limit,
+            "offset": offset,
+            "hasMore": len(customers) == limit
+        }
+    except Exception as e:
+        logger.error(f"Error listing customers: {str(e)}")
+        raise HTTPException(500, detail="Failed to fetch customers from QuickBooks")
     finally:
         await client.aclose()
 
@@ -47,14 +69,27 @@ async def get_customer(
 
 @router.post("")
 async def create_customer(
-    payload: dict,
+    customer: CustomerCanonical,
     current_user: User = Depends(get_current_user)
 ):
+    """Create a new customer with full validation"""
     client = await get_qbo_client(current_user)
     try:
-        resp = await client.post("/customer", json=payload)
-        resp.raise_for_status()
+        payload = {"Customer": customer.to_qbo_payload()}
+        logger.info(f"Creating QuickBooks customer: {customer.DisplayName}")
+        
+        resp = await client.post("/customer?minorversion=75", json=payload)
+        
+        if resp.is_error:
+            error_text = resp.text
+            logger.error(f"QuickBooks API Error (Create Status {resp.status_code}): {error_text}")
+            raise HTTPException(status_code=resp.status_code, detail=f"QuickBooks Error: {error_text}")
+            
         return resp.json()
+    except httpx.HTTPStatusError as e:
+        error_detail = e.response.text
+        logger.error(f"QuickBooks HTTPStatusError during create: {error_detail}")
+        raise HTTPException(status_code=e.response.status_code, detail=error_detail)
     finally:
         await client.aclose()
 
@@ -78,26 +113,26 @@ def unflatten_dict(d: dict) -> dict:
 @router.put("/{customer_id}")
 async def update_customer(
     customer_id: str,
-    payload: dict,                     # Sparse update payload from frontend
+    payload: dict,                     # We still take dict to handle dot-notation unflattening
     current_user: User = Depends(get_current_user)
 ):
-    """Sparse update – QuickBooks requires Id and SyncToken"""
+    """Sparse update with validation and SyncToken auto-fetch if missing"""
     client = await get_qbo_client(current_user)
     try:
-        # 1. Unflatten dot-notation keys from frontend (e.g. "BillAddr.Line1")
+        # 1. Unflatten dot-notation keys from frontend
         nested_payload = unflatten_dict(payload)
-
-        # 2. QuickBooks expects the Customer object directly, NOT wrapped in {"Customer": ...}
-        # for sparse updates via POST.
-        full_payload = {
-            **nested_payload,
-            "Id": customer_id,
-            "sparse": True
-        }
         
-        if "SyncToken" not in full_payload:
+        # 2. Add ID to payload
+        nested_payload["Id"] = customer_id
+        
+        # 3. Handle SyncToken
+        if "SyncToken" not in nested_payload:
             current = await get_customer(customer_id, current_user)
-            full_payload["SyncToken"] = current["SyncToken"]
+            nested_payload["SyncToken"] = current["SyncToken"]
+
+        # 4. Validate via Schema
+        update_model = CustomerUpdate(**nested_payload)
+        full_payload = update_model.to_qbo_payload()
 
         logger.info(f"Sending QuickBooks update for customer {customer_id}: {full_payload}")
         
@@ -108,14 +143,17 @@ async def update_customer(
         
         if resp.is_error:
             error_text = resp.text
-            logger.error(f"QuickBooks API Error (Status {resp.status_code}): {error_text}")
+            logger.error(f"QuickBooks API Error (Update Status {resp.status_code}): {error_text}")
             raise HTTPException(status_code=resp.status_code, detail=f"QuickBooks Error: {error_text}")
             
         return resp.json()
     except httpx.HTTPStatusError as e:
         error_detail = e.response.text
-        logger.error(f"QuickBooks HTTPStatusError: {error_detail}")
+        logger.error(f"QuickBooks HTTPStatusError during update: {error_detail}")
         raise HTTPException(status_code=e.response.status_code, detail=error_detail)
+    except ValueError as e:
+        logger.error(f"Validation error during customer update: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
     finally:
         await client.aclose()
 
