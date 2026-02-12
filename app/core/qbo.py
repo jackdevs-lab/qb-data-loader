@@ -41,9 +41,13 @@ async def get_qbo_client(user: User) -> httpx.AsyncClient:
         "Content-Type": "application/json",
     }
 
+    # Use a transport with limits and potentially add custom retry logic if needed
+    # For production readiness, we'll set a standard timeout and use a manual retry logic in endpoints
+    # or a specialized client wrapper.
     client = httpx.AsyncClient(
         base_url=f"{BASE_URL}/{user.qbo_realm_id}",
         headers=headers,
-        timeout=30.0,
+        timeout=httpx.Timeout(30.0, connect=10.0),
+        follow_redirects=True
     )
     return client
