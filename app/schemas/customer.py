@@ -183,12 +183,19 @@ class CustomerCanonical(BaseModel):
             except ValueError:
                 pass
         raise ValueError("Invalid date format. Supported: YYYY-MM-DD, MM/DD/YYYY, etc.")
+    
     def to_qbo_payload(self) -> Dict[str, Any]:
         data = self.model_dump(exclude_unset=True, exclude_none=True, by_alias=True)
-        inner: Dict[str, Any] = {"DisplayName": data.pop("DisplayName")}
+        
+        # Determine the root key based on the object
+        root_key = "Customer"
+        
+        inner: Dict[str, Any] = {}
+        if "DisplayName" in data:
+            inner["DisplayName"] = data.pop("DisplayName")
 
         scalar_fields = [
-            "CompanyName", "Title", "GivenName", "MiddleName", "FamilyName",
+            "Id", "SyncToken", "CompanyName", "Title", "GivenName", "MiddleName", "FamilyName",
             "Suffix", "Notes", "Taxable", "Active", "Job", "BillWithParent",
             "ParentRef", "CurrencyRef", "PrintOnCheckName", "ResaleNum",
             "BusinessNumber", "GSTIN", "PrimaryTaxIdentifier",
@@ -220,7 +227,9 @@ class CustomerCanonical(BaseModel):
                 nested_dict = {k: v for k, v in obj.items() if v is not None}
 
             if model_field in ("BillAddr", "ShipAddr"):
-                if not nested_dict.get("Line1"):
+                # If Line1 is missing but we have other parts, we might still want it if it's a sparse update
+                # but QBO usually requires Line1 if the address object is sent at all.
+                if not nested_dict.get("Line1") and not nested_dict.get("Id"):
                     continue
                 if "Country" not in nested_dict:
                     state = nested_dict.get("CountrySubDivisionCode", "").strip().upper()
@@ -231,4 +240,16 @@ class CustomerCanonical(BaseModel):
                 inner[qbo_field] = nested_dict
 
         inner.update(data)
-        return {"Customer": inner}
+        
+        # Ensure 'sparse' is included if it's a CustomerUpdate instance
+        if hasattr(self, 'sparse'):
+             inner['sparse'] = getattr(self, 'sparse')
+             
+        return inner # Return the inner dict directly for flexibility in PUT/POST
+
+class CustomerUpdate(CustomerCanonical):
+    """Schema for sparse updates where most fields are optional."""
+    DisplayName: Optional[str] = Field(None, min_length=1, max_length=500)
+    SyncToken: Optional[str] = None
+    Id: Optional[str] = None
+    sparse: bool = Field(True, exclude=False)
