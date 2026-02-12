@@ -78,7 +78,8 @@ function renderCustomerTable(customers) {
 }
 
 function updateCustomerTable() {
-  const filtered = APP_STATE.customers.filter(customer => {
+  const customers = APP_STATE.customers || [];
+  const filtered = customers.filter(customer => {
     let matchesFilter = true;
     if (currentFilter === 'active') {
       matchesFilter = customer.Active;
@@ -96,8 +97,55 @@ function updateCustomerTable() {
     return true;
   });
 
-  document.getElementById('customers-table-container').innerHTML = renderCustomerTable(filtered);
+  const tableContainer = document.getElementById('customers-table-container');
+  if (tableContainer) {
+    tableContainer.innerHTML = renderCustomerTable(filtered);
+    renderPagination();
+  }
 }
+
+function renderPagination() {
+  const container = document.getElementById('pagination-container');
+  if (!container) return;
+
+  const { totalCount, limit, offset } = APP_STATE.customerPagination;
+  const currentPage = Math.floor((offset - 1) / limit) + 1;
+  const totalPages = Math.ceil(totalCount / limit) || 1;
+
+  if (totalPages <= 1 && totalCount < limit) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="flex items-center justify-between px-6 py-4 bg-gray-50 border-t">
+      <div class="text-sm text-gray-700">
+        Showing <span class="font-medium">${offset}</span> to <span class="font-medium">${Math.min(offset + limit - 1, totalCount)}</span> of <span class="font-medium">${totalCount}</span> results
+      </div>
+      <div class="flex space-x-2">
+        <button onclick="changePage(-1)" ${offset === 1 ? 'disabled' : ''} 
+                class="px-4 py-2 border rounded bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+          Previous
+        </button>
+        <button onclick="changePage(1)" ${offset + limit > totalCount ? 'disabled' : ''} 
+                class="px-4 py-2 border rounded bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+          Next
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+window.changePage = async (direction) => {
+  const { limit, offset } = APP_STATE.customerPagination;
+  const newOffset = Math.max(1, offset + (direction * limit));
+
+  if (newOffset === offset) return;
+
+  APP_STATE.customerPagination.offset = newOffset;
+  APP_STATE.customers = []; // Clear current to trigger reload
+  await loadCustomersSection('list');
+};
 
 export async function loadCustomersSection(subSection) {
   try {
@@ -106,13 +154,16 @@ export async function loadCustomersSection(subSection) {
     if (subSection === 'list' || !subSection) {
       // Load customer list if not already loaded
       if (!APP_STATE.customers || APP_STATE.customers.length === 0) {
-        const res = await fetchWithAuth('/api/customers');
+        const { limit, offset } = APP_STATE.customerPagination;
+        const res = await fetchWithAuth(`/api/customers?limit=${limit}&offset=${offset}`);
         if (res.ok) {
-          APP_STATE.customers = await res.json();
+          const data = await res.json();
+          APP_STATE.customers = data.customers || [];
+          APP_STATE.customerPagination.totalCount = data.totalCount || 0;
         }
       }
 
-      const initialCustomers = APP_STATE.customers.filter(c => c.Active);
+      const initialCustomers = (APP_STATE.customers || []).filter(c => c.Active);
 
       html = `
         <div class="fade-in">
@@ -151,8 +202,13 @@ export async function loadCustomersSection(subSection) {
           </div>
          
           <!-- Customers Table -->
-          <div id="customers-table-container" class="bg-white rounded-xl shadow overflow-hidden">
-            ${renderCustomerTable(initialCustomers)}
+          <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div id="customers-table-container">
+              ${renderCustomerTable(initialCustomers)}
+            </div>
+            <div id="pagination-container">
+              ${renderPagination() || ''}
+            </div>
           </div>
         </div>
       `;
