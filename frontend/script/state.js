@@ -6,8 +6,12 @@ export const APP_STATE = {
   currentCustomer: null,
   currentProduct: null,
   customers: [],
+  customerPagination: {
+    totalCount: 0,
+    limit: 100,
+    offset: 1
+  },
   products: [],
-  jobs: [],
   reports: {},
   // Existing import state (from original code)
   currentJobId: null,
